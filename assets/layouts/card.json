@@ -1,0 +1,38 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+	"id": "com.jfms7s.weather.card-layout",
+	"items": [
+		{
+			"key": "icon",
+			"type": "pixmap",
+			"rect": [6, 16, 68, 68]
+		},
+		{
+			"key": "value",
+			"type": "text",
+			"rect": [80, 4, 116, 40],
+			"alignment": "left",
+			"color": "white",
+			"value": "--",
+			"font": { "size": 30, "weight": 700 }
+		},
+		{
+			"key": "label",
+			"type": "text",
+			"rect": [80, 46, 116, 24],
+			"alignment": "left",
+			"color": "white",
+			"value": "",
+			"font": { "size": 16, "weight": 600 }
+		},
+		{
+			"key": "detail",
+			"type": "text",
+			"rect": [80, 72, 116, 22],
+			"alignment": "left",
+			"color": "#d1d5db",
+			"value": "",
+			"font": { "size": 13, "weight": 500 }
+		}
+	]
+}

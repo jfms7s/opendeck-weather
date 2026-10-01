@@ -1,0 +1,67 @@
+{
+	"Name": "Weather",
+	"Author": "jfms7s",
+	"Version": "0.1.0",
+	"Category": "Weather",
+	"Description": "Current weather, daily forecast and air quality for any location, on keys and dials. Data by Open-Meteo - no API key or account needed.",
+	"Icon": "icons/icon",
+	"OS": [{ "Platform": "linux" }],
+	"CodePaths": {
+		"x86_64-unknown-linux-gnu": "opendeck-weather-x86_64-unknown-linux-gnu",
+		"aarch64-unknown-linux-gnu": "opendeck-weather-aarch64-unknown-linux-gnu"
+	},
+	"CodePathLin": "opendeck-weather-x86_64-unknown-linux-gnu",
+	"Actions": [
+		{
+			"UUID": "com.jfms7s.weather.current",
+			"Name": "Weather",
+			"Icon": "icons/weather",
+			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like; on a dial, rotate to scroll the hourly forecast",
+			"Controllers": ["Keypad", "Encoder"],
+			"PropertyInspectorPath": "propertyInspector/index.html",
+			"States": [{ "Image": "icons/weather" }],
+			"Encoder": {
+				"layout": "layouts/card.json",
+				"TriggerDescription": {
+					"Rotate": "Scroll hourly forecast",
+					"Push": "Details",
+					"Touch": "Details"
+				}
+			}
+		},
+		{
+			"UUID": "com.jfms7s.weather.forecast",
+			"Name": "Forecast",
+			"Icon": "icons/forecast",
+			"Tooltip": "One day of the 7-day forecast. Press to step through the days; on a dial, rotate to scroll days",
+			"Controllers": ["Keypad", "Encoder"],
+			"PropertyInspectorPath": "propertyInspector/index.html",
+			"States": [{ "Image": "icons/forecast" }],
+			"Encoder": {
+				"layout": "layouts/card.json",
+				"TriggerDescription": {
+					"Rotate": "Scroll days",
+					"Push": "Sunrise / sunset",
+					"Touch": "Sunrise / sunset"
+				}
+			}
+		},
+		{
+			"UUID": "com.jfms7s.weather.airquality",
+			"Name": "Air Quality",
+			"Icon": "icons/airquality",
+			"Tooltip": "Current air quality index for your location. Press to page through PM2.5, PM10, ozone and NO2",
+			"Controllers": ["Keypad", "Encoder"],
+			"PropertyInspectorPath": "propertyInspector/index.html",
+			"States": [{ "Image": "icons/airquality" }],
+			"Encoder": {
+				"layout": "layouts/card.json",
+				"TriggerDescription": {
+					"Rotate": "Page pollutants",
+					"Push": "Back to index",
+					"Touch": "Back to index"
+				}
+			}
+		}
+	]
+}

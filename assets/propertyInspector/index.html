@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<style>
+		body { font: 12px system-ui, sans-serif; margin: 0; padding: 8px 12px; }
+		label { display: block; margin-top: 10px; font-size: 11px; opacity: 0.8; }
+		select, input, button { box-sizing: border-box; margin-top: 2px; font: inherit; }
+		select, input { width: 100%; }
+		.row { display: flex; gap: 6px; }
+		.row input { flex: 1; }
+		#current { margin-top: 4px; font-weight: 600; }
+		#status { margin-top: 4px; font-size: 11px; opacity: 0.8; min-height: 1em; }
+		#results { display: none; }
+		.hidden { display: none; }
+		.attribution { margin-top: 14px; font-size: 10px; opacity: 0.6; }
+	</style>
+</head>
+<body>
+	<label for="query">Location</label>
+	<div id="current">Not set</div>
+	<div class="row">
+		<input type="text" id="query" placeholder="City or postal code" />
+		<button id="search">Search</button>
+	</div>
+	<div id="status"></div>
+	<select id="results" size="5"></select>
+
+	<label for="units">Units</label>
+	<select id="units">
+		<option value="metric">Metric (°C, km/h)</option>
+		<option value="imperial">Imperial (°F, mph)</option>
+	</select>
+
+	<div id="day-field" class="hidden">
+		<label for="day">Day</label>
+		<select id="day">
+			<option value="0">Today</option>
+			<option value="1">Tomorrow</option>
+			<option value="2">In 2 days</option>
+			<option value="3">In 3 days</option>
+			<option value="4">In 4 days</option>
+			<option value="5">In 5 days</option>
+			<option value="6">In 6 days</option>
+		</select>
+	</div>
+
+	<div id="aqi-field" class="hidden">
+		<label for="aqi_scale">Index</label>
+		<select id="aqi_scale">
+			<option value="us">US AQI</option>
+			<option value="european">European AQI</option>
+		</select>
+	</div>
+
+	<div class="attribution">Weather data by Open-Meteo.com (CC BY 4.0)</div>
+
+	<script>
+		window.connectOpenActionSocketData = new Promise((resolve) => {
+			window.connectOpenActionSocket = (...args) => resolve(args);
+			window.connectElgatoStreamDeckSocket = window.connectOpenActionSocket;
+		});
+
+		const $ = (id) => document.getElementById(id);
+		let websocket;
+		let uuid;
+		let action;
+		// Always sent whole: setSettings replaces the instance's settings,
+		// so fields this action ignores must still round-trip untouched.
+		let settings = {};
+		let places = [];
+
+		window.connectOpenActionSocketData.then(([inPort, inUUID, inRegisterEvent, inInfo, inActionInfo]) => {
+			uuid = inUUID;
+			const actionInfo = JSON.parse(inActionInfo);
+			action = actionInfo.action;
+			$("day-field").classList.toggle("hidden", action !== "com.jfms7s.weather.forecast");
+			$("aqi-field").classList.toggle("hidden", action !== "com.jfms7s.weather.airquality");
+
+			websocket = new WebSocket(`ws://127.0.0.1:${inPort}`);
+			websocket.onopen = () => {
+				websocket.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
+				applySettings(actionInfo.payload.settings || {});
+			};
+			websocket.onmessage = (event) => {
+				const message = JSON.parse(event.data);
+				if (message.event === "didReceiveSettings") {
+					applySettings(message.payload.settings || {});
+				} else if (message.event === "sendToPropertyInspector") {
+					handlePluginMessage(message.payload);
+				}
+			};
+		});
+
+		function applySettings(s) {
+			settings = s;
+			$("current").textContent = s.location ? s.location.name : "Not set";
+			$("units").value = s.units || "metric";
+			$("day").value = String(s.day ?? 1);
+			$("aqi_scale").value = s.aqi_scale || "us";
+		}
+
+		function sendSettings() {
+			websocket.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+		}
+
+		function search() {
+			const query = $("query").value.trim();
+			if (!query) return;
+			$("status").textContent = "Searching…";
+			websocket.send(JSON.stringify({
+				event: "sendToPlugin",
+				action,
+				context: uuid,
+				payload: { event: "search", query },
+			}));
+		}
+
+		function handlePluginMessage(payload) {
+			if (payload.event !== "searchResults") return;
+			if (payload.query !== $("query").value.trim()) return; // superseded
+			const select = $("results");
+			select.innerHTML = "";
+			if (payload.error) {
+				$("status").textContent = "Search failed: " + payload.error;
+				select.style.display = "none";
+				return;
+			}
+			places = payload.results || [];
+			if (places.length === 0) {
+				$("status").textContent = "No matches";
+				select.style.display = "none";
+				return;
+			}
+			$("status").textContent = "Pick a match:";
+			places.forEach((p, i) => {
+				const option = document.createElement("option");
+				option.value = String(i);
+				option.textContent = p.label;
+				select.appendChild(option);
+			});
+			select.style.display = "block";
+		}
+
+		function pickPlace() {
+			const place = places[Number($("results").value)];
+			if (!place) return;
+			settings.location = { name: place.name, latitude: place.latitude, longitude: place.longitude };
+			$("current").textContent = place.label;
+			$("results").style.display = "none";
+			$("status").textContent = "";
+			sendSettings();
+		}
+
+		$("search").addEventListener("click", search);
+		$("query").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+		$("results").addEventListener("change", pickPlace);
+		$("units").addEventListener("change", () => { settings.units = $("units").value; sendSettings(); });
+		$("day").addEventListener("change", () => { settings.day = Number($("day").value); sendSettings(); });
+		$("aqi_scale").addEventListener("change", () => { settings.aqi_scale = $("aqi_scale").value; sendSettings(); });
+	</script>
+</body>
+</html>
