@@ -1,7 +1,7 @@
 {
 	"Name": "Weather",
 	"Author": "jfms7s",
-	"Version": "0.1.0",
+	"Version": "0.1.1",
 	"Category": "Weather",
 	"Description": "Current weather, daily forecast and air quality for any location, on keys and dials. Data by Open-Meteo - no API key or account needed.",
 	"Icon": "icons/icon",
