@@ -3,58 +3,71 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link rel="stylesheet" href="pi.css" />
 	<style>
-		body { font: 12px system-ui, sans-serif; margin: 0; padding: 8px 12px; }
-		label { display: block; margin-top: 10px; font-size: 11px; opacity: 0.8; }
-		select, input, button { box-sizing: border-box; margin-top: 2px; font: inherit; }
-		select, input { width: 100%; }
-		.row { display: flex; gap: 6px; }
-		.row input { flex: 1; }
-		#current { margin-top: 4px; font-weight: 600; }
-		#status { margin-top: 4px; font-size: 11px; opacity: 0.8; min-height: 1em; }
+		#current { color: var(--pi-text); font-weight: 600; overflow-wrap: anywhere; }
+		/* Shown and hidden by the script through style.display. */
 		#results { display: none; }
-		.hidden { display: none; }
-		.attribution { margin-top: 14px; font-size: 10px; opacity: 0.6; }
 	</style>
 </head>
 <body>
-	<label for="query">Location</label>
-	<div id="current">Not set</div>
-	<div class="row">
-		<input type="text" id="query" placeholder="City or postal code" />
-		<button id="search">Search</button>
-	</div>
-	<div id="status"></div>
-	<select id="results" size="5"></select>
+	<main class="pi">
+		<section class="card">
+			<h2>Location</h2>
+			<div class="field">
+				<span class="label">Current location</span>
+				<div id="current">Not set</div>
+			</div>
+			<div class="field">
+				<label for="query">Search</label>
+				<div class="row">
+					<input type="text" id="query" placeholder="City or postal code" />
+					<button id="search" class="primary">Search</button>
+				</div>
+				<p id="status" class="hint"></p>
+				<select id="results" size="5"></select>
+			</div>
+		</section>
 
-	<label for="units">Units</label>
-	<select id="units">
-		<option value="metric">Metric (°C, km/h)</option>
-		<option value="imperial">Imperial (°F, mph)</option>
-	</select>
+		<section class="card">
+			<h2>Display</h2>
+			<div class="field">
+				<label for="units">Units</label>
+				<select id="units">
+					<option value="metric">Metric (°C, km/h)</option>
+					<option value="imperial">Imperial (°F, mph)</option>
+				</select>
+			</div>
 
-	<div id="day-field" class="hidden">
-		<label for="day">Day</label>
-		<select id="day">
-			<option value="0">Today</option>
-			<option value="1">Tomorrow</option>
-			<option value="2">In 2 days</option>
-			<option value="3">In 3 days</option>
-			<option value="4">In 4 days</option>
-			<option value="5">In 5 days</option>
-			<option value="6">In 6 days</option>
-		</select>
-	</div>
+			<div id="day-field" class="field hidden">
+				<label for="day">Day</label>
+				<select id="day">
+					<option value="0">Today</option>
+					<option value="1">Tomorrow</option>
+					<option value="2">In 2 days</option>
+					<option value="3">In 3 days</option>
+					<option value="4">In 4 days</option>
+					<option value="5">In 5 days</option>
+					<option value="6">In 6 days</option>
+				</select>
+				<p class="hint">Which day's forecast the key shows.</p>
+			</div>
 
-	<div id="aqi-field" class="hidden">
-		<label for="aqi_scale">Index</label>
-		<select id="aqi_scale">
-			<option value="us">US AQI</option>
-			<option value="european">European AQI</option>
-		</select>
-	</div>
+			<div id="aqi-field" class="field hidden">
+				<label for="aqi_scale">Index</label>
+				<select id="aqi_scale">
+					<option value="us">US AQI</option>
+					<option value="european">European AQI</option>
+				</select>
+				<p class="hint">Air-quality scale the key shows.</p>
+			</div>
+		</section>
 
-	<div class="attribution">Weather data by Open-Meteo.com (CC BY 4.0)</div>
+		<section class="card">
+			<h2>Data source</h2>
+			<p class="hint">Weather data by Open-Meteo.com (CC BY 4.0)</p>
+		</section>
+	</main>
 
 	<script>
 		window.connectOpenActionSocketData = new Promise((resolve) => {
