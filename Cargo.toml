@@ -1,6 +1,6 @@
 [package]
 name = "opendeck-weather"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "OpenDeck plugin: current weather, daily forecast and air quality on Stream Deck keys and dials"
