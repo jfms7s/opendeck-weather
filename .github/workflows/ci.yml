@@ -69,6 +69,16 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: cargo build --release --locked
+      # The release's build-macos checks, here so a PR catches them before a tag.
+      - name: Check it is a signed arm64 binary that starts
+        run: |
+          bin=target/release/opendeck-weather
+          file "$bin"
+          file -b "$bin" | grep -Eq '^Mach-O 64-bit (arm64 executable|executable arm64)'
+          codesign --verify --verbose "$bin"
+          out=$("$bin" 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "missing CLI flag: -port"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24

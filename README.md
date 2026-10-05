@@ -133,7 +133,8 @@ Run this in a live OpenDeck + Stream Deck session before cutting a release:
       Remove the rule (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys
       recover within about a minute.
 
-On a Mac (Apple Silicon), additionally:
+On a Mac (Apple Silicon), additionally - with the draft release's bundle (Releasing,
+step 4):
 
 - [ ] The release bundle installs through OpenDeck and every action above renders.
 - [ ] `xattr -l` on the installed `opendeck-weather-aarch64-apple-darwin` shows no
@@ -168,12 +169,14 @@ run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
 
 1. Bump `version` in `Cargo.toml` and `Version` in `assets/manifest.json` together
    (`node build.mjs` and CI fail if they differ).
-2. Run the smoke-test checklist on Linux and on a Mac and paste it, ticked, with the
-   OpenDeck version and device, into the release PR.
+2. Run the smoke-test checklist on a local build (`node build.mjs`) and paste it,
+   ticked, with the OpenDeck version and device, into the release PR.
 3. After merging, tag the merge commit `vX.Y.Z` and push the tag. The release workflow
    tests and builds it and creates a **draft** release with the bundle, `SHA256SUMS`
    and a build-provenance attestation.
-4. Write the notes (including the ticked checklist) and publish the draft.
+4. Install the draft's bundle through OpenDeck on Linux and on a Mac, and run the
+   checklist's "On a Mac" items there.
+5. Write the notes (including the ticked checklists) and publish the draft.
 
 ## Attribution
 
