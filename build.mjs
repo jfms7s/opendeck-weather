@@ -54,8 +54,10 @@ for (const [triple, file] of Object.entries(codePaths)) {
 		fail(`manifest CodePaths[${triple}] is ${file}, expected ${BIN_NAME}-${triple}`);
 	}
 }
-if (manifest.CodePathLin && !Object.values(codePaths).includes(manifest.CodePathLin)) {
-	fail(`manifest CodePathLin ${manifest.CodePathLin} is not one of its CodePaths`);
+for (const key of ["CodePathLin", "CodePathMac"]) {
+	if (manifest[key] && !Object.values(codePaths).includes(manifest[key])) {
+		fail(`manifest ${key} ${manifest[key]} is not one of its CodePaths`);
+	}
 }
 
 const hostTriple = () => {

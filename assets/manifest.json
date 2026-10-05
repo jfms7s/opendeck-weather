@@ -5,12 +5,14 @@
 	"Category": "Weather",
 	"Description": "Current weather, daily forecast and air quality for any location, on keys and dials. Data by Open-Meteo - no API key or account needed.",
 	"Icon": "icons/icon",
-	"OS": [{ "Platform": "linux" }],
+	"OS": [{ "Platform": "linux" }, { "Platform": "mac" }],
 	"CodePaths": {
 		"x86_64-unknown-linux-gnu": "opendeck-weather-x86_64-unknown-linux-gnu",
-		"aarch64-unknown-linux-gnu": "opendeck-weather-aarch64-unknown-linux-gnu"
+		"aarch64-unknown-linux-gnu": "opendeck-weather-aarch64-unknown-linux-gnu",
+		"aarch64-apple-darwin": "opendeck-weather-aarch64-apple-darwin"
 	},
 	"CodePathLin": "opendeck-weather-x86_64-unknown-linux-gnu",
+	"CodePathMac": "opendeck-weather-aarch64-apple-darwin",
 	"Actions": [
 		{
 			"UUID": "com.jfms7s.weather.current",

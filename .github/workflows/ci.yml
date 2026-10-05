@@ -52,9 +52,56 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
       - run: cargo check --locked --target aarch64-unknown-linux-gnu
 
+  macos:
+    # The release ships an Apple Silicon binary: lint, test and package it
+    # natively. fmt and cargo-deny don't depend on the platform.
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-01
+        with:
+          toolchain: 1.98.1
+          components: clippy
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      # The release's build-macos checks, here so a PR catches them before a tag.
+      - name: Check it is a signed arm64 binary that starts
+        run: |
+          bin=target/release/opendeck-weather
+          file "$bin"
+          file -b "$bin" | grep -Eq '^Mach-O 64-bit (arm64 executable|executable arm64)'
+          codesign --verify --verbose "$bin"
+          out=$("$bin" 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "missing CLI flag: -port"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: node build.mjs
+
   msrv:
     # Cargo.toml's rust-version is a claim; build on exactly that version.
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-01
+        with:
+          toolchain: 1.88.0
+      - run: cargo check --locked --all-targets
+
+  # The same MSRV check on macOS, as its own job: the master ruleset requires
+  # a check named exactly `msrv`, which a matrix would rename.
+  msrv-macos:
+    runs-on: macos-15
     permissions:
       contents: read
     steps:
