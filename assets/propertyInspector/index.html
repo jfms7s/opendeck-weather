@@ -6,8 +6,6 @@
 	<link rel="stylesheet" href="pi.css" />
 	<style>
 		#current { color: var(--pi-text); font-weight: 600; overflow-wrap: anywhere; }
-		/* Shown and hidden by the script through style.display. */
-		#results { display: none; }
 	</style>
 </head>
 <body>
@@ -17,15 +15,21 @@
 			<div class="field">
 				<span class="label">Current location</span>
 				<div id="current">Not set</div>
+				<p id="default-hint" class="hint"></p>
+				<div class="row">
+					<button id="make-default" class="hidden">Use for all actions</button>
+					<button id="follow-default" class="hidden">Use the default instead</button>
+				</div>
 			</div>
 			<div class="field">
 				<label for="query">Search</label>
 				<div class="row">
-					<input type="text" id="query" placeholder="City or postal code" />
+					<!-- maxlength matches MAX_QUERY_CHARS in src/open_meteo.rs -->
+					<input type="text" id="query" maxlength="100" placeholder="City or postal code" />
 					<button id="search" class="primary">Search</button>
 				</div>
 				<p id="status" class="hint"></p>
-				<select id="results" size="5"></select>
+				<select id="results" class="hidden" size="5"></select>
 			</div>
 		</section>
 
@@ -39,8 +43,10 @@
 				</select>
 			</div>
 
-			<div id="day-field" class="field hidden">
+			<!-- Fields with data-action show only for that action. -->
+			<div class="field hidden" data-action="com.jfms7s.weather.forecast">
 				<label for="day">Day</label>
+				<!-- One option per forecast day: FORECAST_DAYS in src/open_meteo.rs -->
 				<select id="day">
 					<option value="0">Today</option>
 					<option value="1">Tomorrow</option>
@@ -53,7 +59,7 @@
 				<p class="hint">Which day's forecast the key shows.</p>
 			</div>
 
-			<div id="aqi-field" class="field hidden">
+			<div class="field hidden" data-action="com.jfms7s.weather.airquality">
 				<label for="aqi_scale">Index</label>
 				<select id="aqi_scale">
 					<option value="us">US AQI</option>
@@ -76,25 +82,28 @@
 		});
 
 		const $ = (id) => document.getElementById(id);
+		const show = (el, visible) => el.classList.toggle("hidden", !visible);
 		let websocket;
 		let uuid;
 		let action;
 		// Always sent whole: setSettings replaces the instance's settings,
 		// so fields this action ignores must still round-trip untouched.
 		let settings = {};
+		// The plugin-wide default location, used when settings.location is unset.
+		let defaultLocation = null;
 		let places = [];
 
 		window.connectOpenActionSocketData.then(([inPort, inUUID, inRegisterEvent, inInfo, inActionInfo]) => {
 			uuid = inUUID;
 			const actionInfo = JSON.parse(inActionInfo);
 			action = actionInfo.action;
-			$("day-field").classList.toggle("hidden", action !== "com.jfms7s.weather.forecast");
-			$("aqi-field").classList.toggle("hidden", action !== "com.jfms7s.weather.airquality");
+			document.querySelectorAll("[data-action]").forEach((el) => show(el, el.dataset.action === action));
 
 			websocket = new WebSocket(`ws://127.0.0.1:${inPort}`);
 			websocket.onopen = () => {
 				websocket.send(JSON.stringify({ event: inRegisterEvent, uuid: inUUID }));
 				applySettings(actionInfo.payload.settings || {});
+				sendToPlugin({ event: "getDefaultLocation" });
 			};
 			websocket.onmessage = (event) => {
 				const message = JSON.parse(event.data);
@@ -106,44 +115,77 @@
 			};
 		});
 
-		function applySettings(s) {
-			settings = s;
-			$("current").textContent = s.location ? s.location.name : "Not set";
-			$("units").value = s.units || "metric";
-			$("day").value = String(s.day ?? 1);
-			$("aqi_scale").value = s.aqi_scale || "us";
+		/** False (and nothing is sent) until the socket is open. */
+		function send(message) {
+			if (websocket?.readyState !== WebSocket.OPEN) return false;
+			websocket.send(JSON.stringify(message));
+			return true;
+		}
+
+		function sendToPlugin(payload) {
+			return send({ event: "sendToPlugin", action, context: uuid, payload });
 		}
 
 		function sendSettings() {
-			websocket.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+			send({ event: "setSettings", context: uuid, payload: settings });
+		}
+
+		const placeName = (location) => location.label || location.name;
+
+		// The fallbacks below must equal Settings::default() in src/model.rs
+		// (a Rust test checks them).
+		function applySettings(s) {
+			settings = s;
+			$("units").value = s.units || "metric";
+			$("day").value = String(s.day ?? 1);
+			$("aqi_scale").value = s.aqi_scale || "us";
+			showLocation();
+		}
+
+		function showLocation() {
+			const own = settings.location;
+			if (own) {
+				$("current").textContent = placeName(own);
+			} else if (defaultLocation) {
+				$("current").textContent = placeName(defaultLocation) + " (default)";
+			} else {
+				$("current").textContent = "Not set";
+			}
+			$("default-hint").textContent = defaultLocation
+				? "Default for all actions: " + placeName(defaultLocation)
+				: "";
+			const isDefault = own && defaultLocation
+				&& own.latitude === defaultLocation.latitude && own.longitude === defaultLocation.longitude;
+			show($("make-default"), Boolean(own) && !isDefault);
+			show($("follow-default"), Boolean(own) && Boolean(defaultLocation));
 		}
 
 		function search() {
 			const query = $("query").value.trim();
 			if (!query) return;
+			if (!sendToPlugin({ event: "search", query })) return;
 			$("status").textContent = "Searching…";
-			websocket.send(JSON.stringify({
-				event: "sendToPlugin",
-				action,
-				context: uuid,
-				payload: { event: "search", query },
-			}));
 		}
 
 		function handlePluginMessage(payload) {
+			if (payload.event === "defaultLocation") {
+				defaultLocation = payload.location || null;
+				showLocation();
+				return;
+			}
 			if (payload.event !== "searchResults") return;
 			if (payload.query !== $("query").value.trim()) return; // superseded
 			const select = $("results");
 			select.innerHTML = "";
 			if (payload.error) {
 				$("status").textContent = "Search failed: " + payload.error;
-				select.style.display = "none";
+				show(select, false);
 				return;
 			}
 			places = payload.results || [];
 			if (places.length === 0) {
 				$("status").textContent = "No matches";
-				select.style.display = "none";
+				show(select, false);
 				return;
 			}
 			$("status").textContent = "Pick a match:";
@@ -153,22 +195,35 @@
 				option.textContent = p.label;
 				select.appendChild(option);
 			});
-			select.style.display = "block";
+			show(select, true);
 		}
 
 		function pickPlace() {
 			const place = places[Number($("results").value)];
 			if (!place) return;
-			settings.location = { name: place.name, latitude: place.latitude, longitude: place.longitude };
-			$("current").textContent = place.label;
-			$("results").style.display = "none";
+			settings.location = {
+				name: place.name,
+				label: place.label,
+				latitude: place.latitude,
+				longitude: place.longitude,
+			};
+			show($("results"), false);
 			$("status").textContent = "";
+			showLocation();
 			sendSettings();
 		}
 
 		$("search").addEventListener("click", search);
 		$("query").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
 		$("results").addEventListener("change", pickPlace);
+		$("make-default").addEventListener("click", () => {
+			sendToPlugin({ event: "setDefaultLocation", location: settings.location });
+		});
+		$("follow-default").addEventListener("click", () => {
+			delete settings.location;
+			showLocation();
+			sendSettings();
+		});
 		$("units").addEventListener("change", () => { settings.units = $("units").value; sendSettings(); });
 		$("day").addEventListener("change", () => { settings.day = Number($("day").value); sendSettings(); });
 		$("aqi_scale").addEventListener("change", () => { settings.aqi_scale = $("aqi_scale").value; sendSettings(); });

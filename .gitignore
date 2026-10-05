@@ -1,3 +1,4 @@
 /target
 /dist
-*.sdPlugin.zip
+/opendeck-weather.streamDeckPlugin
+/SHA256SUMS

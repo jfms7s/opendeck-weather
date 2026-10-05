@@ -1,7 +1,12 @@
 //! What one action instance shows, independent of the surface it's on.
 //! Every action builds a `Card`; `key_image` draws it on a keypad tile and
-//! `feedback` sends it to a dial's touch strip (`assets/layouts/card.json`),
-//! so a key and a dial showing the same thing can never disagree.
+//! `feedback` sends it to a dial's touch strip (`assets/layouts/card.json`).
+//!
+//! The two surfaces don't have the same room: a dial shows the value plus
+//! two lines (`label`, `detail`), a key the value plus one. A key draws
+//! `key_line()` - `label` unless the view chose something else on purpose
+//! with `with_key_label` - so what a key shows is a decision each view
+//! makes, and the per-view tests in `views.rs` pin it.
 //!
 //! Key text is drawn inside the image rather than sent as the native title:
 //! OpenDeck paints native titles with each key's own font/size/alignment on
@@ -9,13 +14,10 @@
 //! inconsistent between tiles (same rationale as opendeck-claude-usage).
 
 use crate::glyphs::{self, Glyph};
+use crate::palette;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
-
-const CARD_COLOR: &str = "#111827";
-pub const TEXT_COLOR: &str = "#f9fafb";
-const MUTED_TEXT_COLOR: &str = "#d1d5db";
 
 /// Widest a key text line may render, in viewBox units (of 100).
 const MAX_TEXT_WIDTH: f64 = 94.0;
@@ -31,10 +33,70 @@ pub struct Card {
     pub value: String,
     /// Color for `value`; `None` = default text color.
     pub accent: Option<&'static str>,
-    /// Second line, shown on keys and dials.
+    /// Second line on a dial, and on a key unless `key_label` is set.
     pub label: String,
     /// Third line - dials only (keys have no room for it).
     pub detail: String,
+    /// What a key shows instead of `label`, when the two should differ.
+    pub key_label: Option<String>,
+    /// The data is older than the cache TTL (refreshing it failed): drawn
+    /// muted, with a small clock badge, on both surfaces.
+    pub stale: bool,
+}
+
+impl Card {
+    pub fn new(
+        glyph: Glyph,
+        value: impl Into<String>,
+        label: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Card {
+            glyph,
+            value: value.into(),
+            accent: None,
+            label: label.into(),
+            detail: detail.into(),
+            key_label: None,
+            stale: false,
+        }
+    }
+
+    pub fn with_accent(self, accent: Option<&'static str>) -> Self {
+        Card { accent, ..self }
+    }
+
+    pub fn with_key_label(self, key_label: impl Into<String>) -> Self {
+        Card {
+            key_label: Some(key_label.into()),
+            ..self
+        }
+    }
+
+    pub fn marked_stale(self, stale: bool) -> Self {
+        Card { stale, ..self }
+    }
+
+    /// The one text line a key has room for under the value.
+    pub fn key_line(&self) -> &str {
+        self.key_label.as_deref().unwrap_or(&self.label)
+    }
+
+    fn value_color(&self) -> &'static str {
+        if self.stale {
+            palette::STALE
+        } else {
+            self.accent.unwrap_or(palette::TEXT)
+        }
+    }
+
+    fn glyph_body(&self) -> String {
+        let mut body = glyphs::body(self.glyph);
+        if self.stale {
+            body.push_str(&glyphs::stale_badge());
+        }
+        body
+    }
 }
 
 fn escape_xml(s: &str) -> String {
@@ -64,18 +126,13 @@ fn text_line(y: f64, size: f64, bold: bool, color: &str, content: &str) -> Strin
     )
 }
 
-pub fn key_svg(card: &Card) -> String {
-    let glyph = glyphs::body(card.glyph);
-    let value = text_line(
-        73.0,
-        26.0,
-        true,
-        card.accent.unwrap_or(TEXT_COLOR),
-        &card.value,
-    );
-    let label = text_line(92.0, 14.0, false, MUTED_TEXT_COLOR, &card.label);
+pub(crate) fn key_svg(card: &Card) -> String {
+    let background = palette::BACKGROUND;
+    let glyph = card.glyph_body();
+    let value = text_line(73.0, 26.0, true, card.value_color(), &card.value);
+    let label = text_line(92.0, 14.0, false, palette::MUTED_TEXT, card.key_line());
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="{CARD_COLOR}"/><svg x="28" y="3" width="44" height="44" viewBox="0 0 24 24">{glyph}</svg>{value}{label}</svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="{background}"/><svg x="28" y="3" width="44" height="44" viewBox="0 0 24 24">{glyph}</svg>{value}{label}</svg>"#
     )
 }
 
@@ -90,8 +147,8 @@ pub fn key_image(card: &Card) -> String {
 /// `setFeedback` payload for `assets/layouts/card.json`.
 pub fn feedback(card: &Card) -> Value {
     json!({
-        "icon": glyphs::svg(card.glyph),
-        "value": { "value": card.value, "color": card.accent.unwrap_or(TEXT_COLOR) },
+        "icon": glyphs::document(&card.glyph_body()),
+        "value": { "value": card.value, "color": card.value_color() },
         "label": card.label,
         "detail": card.detail,
     })
@@ -100,19 +157,19 @@ pub fn feedback(card: &Card) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::glyphs::tests::assert_well_formed;
     use crate::wmo::Condition;
 
     fn card() -> Card {
-        Card {
-            glyph: Glyph::Weather {
+        Card::new(
+            Glyph::Weather {
                 condition: Condition::Rain,
                 is_day: true,
             },
-            value: "18°".into(),
-            accent: None,
-            label: "Rain & wind".into(),
-            detail: "Lisbon".into(),
-        }
+            "18°",
+            "Rain & wind",
+            "Lisbon",
+        )
     }
 
     fn decode(uri: &str) -> String {
@@ -127,6 +184,16 @@ mod tests {
         assert!(svg.contains(">18°</text>"), "{svg}");
         assert!(svg.contains(">Rain &amp; wind</text>"), "{svg}");
         assert!(!svg.contains("Lisbon"), "{svg}");
+        assert_well_formed(&svg);
+    }
+
+    #[test]
+    fn a_key_label_replaces_the_label_on_keys_only() {
+        let c = card().with_key_label("Tomorrow · 70%");
+        let svg = key_svg(&c);
+        assert!(svg.contains(">Tomorrow · 70%</text>"), "{svg}");
+        assert!(!svg.contains("Rain &amp; wind"), "{svg}");
+        assert_eq!(feedback(&c)["label"], "Rain & wind");
     }
 
     #[test]
@@ -134,6 +201,24 @@ mod tests {
         let mut c = card();
         c.label = "Thunderstorm with hail".into();
         assert!(key_svg(&c).contains(r#"textLength="94""#));
+    }
+
+    #[test]
+    fn stale_cards_are_muted_and_badged_on_both_surfaces() {
+        let fresh = card().with_accent(Some("#22c55e"));
+        let stale = fresh.clone().marked_stale(true);
+        let badge = glyphs::stale_badge();
+
+        assert!(!key_svg(&fresh).contains(&badge));
+        assert!(key_svg(&stale).contains(&badge));
+        assert!(key_svg(&stale).contains(&format!(r#"fill="{}">18°<"#, palette::STALE)));
+        assert_well_formed(&key_svg(&stale));
+
+        assert_eq!(feedback(&fresh)["value"]["color"], "#22c55e");
+        assert_eq!(feedback(&stale)["value"]["color"], palette::STALE);
+        let icon = feedback(&stale)["icon"].as_str().unwrap().to_string();
+        assert!(icon.contains(&badge));
+        assert_well_formed(&icon);
     }
 
     #[test]
@@ -153,9 +238,26 @@ mod tests {
     }
 
     #[test]
+    fn the_shipped_layout_uses_the_same_text_colors_as_keys() {
+        let layout: Value =
+            serde_json::from_str(include_str!("../assets/layouts/card.json")).unwrap();
+        let color = |key: &str| {
+            layout["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["key"] == key)
+                .unwrap()["color"]
+                .clone()
+        };
+        assert_eq!(color("value"), palette::TEXT);
+        assert_eq!(color("label"), palette::MUTED_TEXT);
+        assert_eq!(color("detail"), palette::MUTED_TEXT);
+    }
+
+    #[test]
     fn feedback_colors_the_value_with_the_accent() {
-        let mut c = card();
-        c.accent = Some("#22c55e");
+        let c = card().with_accent(Some("#22c55e"));
         assert_eq!(feedback(&c)["value"]["color"], "#22c55e");
     }
 }

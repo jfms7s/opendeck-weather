@@ -6,6 +6,10 @@ plugin for Stream Deck. It has three actions - **Weather**, **Forecast** and **A
 Quality** - each assignable to a key or a dial. Data comes from
 [Open-Meteo](https://open-meteo.com): free, and no API key or account needed.
 
+Built for, and tested only with, OpenDeck on Linux (x86_64 and aarch64). The code
+has no Linux-specific parts, but OpenDeck on Windows and macOS has never been tried,
+so the manifest doesn't offer it there.
+
 ## Actions
 
 ### Weather
@@ -22,9 +26,11 @@ and the sky condition.
 
 One day of the 7-day forecast: high/low, condition, and chance of rain.
 
-- **Key** - shows the configured day (tomorrow by default). Press to step through the
-  next days. Put several Forecast keys in a row, set to Today, Tomorrow, In 2 days... for
-  a multi-day strip.
+- **Key** - shows the configured day (tomorrow by default): its icon, high/low, and
+  the day with its chance of rain (e.g. `Tomorrow · 70%`; just the day when rain is
+  unlikely). Press to step through the following days; after the last day the
+  forecast still covers, it wraps back to Today. Put several Forecast keys in a row,
+  set to Today, Tomorrow, In 2 days... for a multi-day strip.
 - **Dial** - rotate to scroll through the days. Press or tap for sunrise and sunset.
 
 ### Air Quality
@@ -44,11 +50,16 @@ Every action has the same settings:
 
 - **Location** - type a city or postal code, press Search (or Enter), and pick the right
   match from the list. The search runs through Open-Meteo's geocoding API.
+  **Use for all actions** makes it the default location: every action without a
+  location of its own uses it, so a row of Forecast keys needs only one search. An
+  action with its own location can go back to the default with **Use the default
+  instead**.
 - **Units** - Metric (°C, km/h) or Imperial (°F, mph).
 - **Day** (Forecast only) - which day the key shows when you're not browsing.
 - **Index** (Air Quality only) - US or European AQI.
 
-Until a location is set, an action shows a map pin and "Set location".
+Until a location (its own or the default) is set, an action shows a map pin and
+"Set location".
 
 ## How it fetches data
 
@@ -56,17 +67,27 @@ Until a location is set, an action shows a map pin and "Set location".
   and air quality are re-fetched at most every 10 minutes. Each action re-renders every
   minute, so the current hour stays up to date.
 - If a request fails, the last good data stays on screen for up to 3 hours, and the
-  plugin waits a minute before trying again. With no data at all, the key shows a
-  crossed-out cloud and "No data".
+  plugin tries again at the next minute's refresh. Data older than 10 minutes is
+  marked: its number turns gray and a small clock appears on the icon. A Weather key
+  then shows the forecast for the current hour rather than the old reading. With no
+  data at all, the key shows a crossed-out cloud and "No data".
+- Fetches never hold up the deck: a press or turn always responds at once, even while
+  the network is slow or down.
 - Times (hours, sunrise, sunset) use the location's local time, not your machine's.
 
 ## Installing
 
-Download the latest `.streamDeckPlugin` from
-[Releases](https://github.com/jfms7s/opendeck-weather/releases). Then either
-double-click it (if your file manager associates the extension with OpenDeck) or unzip it
-into `~/.config/opendeck/plugins/` and restart OpenDeck (OpenDeck only loads plugins at
-startup).
+Download the latest `.streamDeckPlugin` and `SHA256SUMS` from
+[Releases](https://github.com/jfms7s/opendeck-weather/releases), and check them:
+
+```bash
+sha256sum -c SHA256SUMS
+gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather
+```
+
+Then either double-click it (if your file manager associates the extension with
+OpenDeck) or unzip it into `~/.config/opendeck/plugins/` and restart OpenDeck (OpenDeck
+only loads plugins at startup).
 
 ## Manual smoke-test checklist
 
@@ -83,27 +104,55 @@ Run this in a live OpenDeck + Stream Deck session before cutting a release:
 - [ ] On a dial, rotating Weather clockwise steps through the hours (the label shows the
       hour, e.g. `16:00`). It stops at +24h, and rotating back stops at "now". Pressing
       shows the details screen.
-- [ ] A Forecast key set to "Tomorrow" is labelled "Tomorrow". Pressing it steps to the
-      next dates and wraps back to Today after the 7th day.
+- [ ] A Forecast key set to "Tomorrow" shows "Tomorrow" with its chance of rain (e.g.
+      `Tomorrow · 70%`) under the high/low. Pressing it steps to the next dates and
+      wraps back to Today after the last day.
+- [ ] "Use for all actions" on one action's location makes a new, unconfigured action
+      show that place; "Use the default instead" on another switches it to the default.
 - [ ] On a dial, pressing Forecast shows `↑HH:MM ↓HH:MM` sunrise/sunset.
 - [ ] Air Quality shows a number colored by category. Presses page through PM2.5 → PM10
       → Ozone → NO₂ → index. Switching Index to European changes the number and category.
 - [ ] With the network down (e.g. `nmcli networking off`), keys keep showing their last
       data. A key given a new, never-fetched location shows "No data". After the network
       comes back, the keys recover within about a minute.
+- [ ] With requests hanging instead of failing
+      (`sudo iptables -A OUTPUT -p tcp --dport 443 -j DROP`), presses and turns still
+      respond at once. After about 10 minutes the values turn gray with a clock badge.
+      Remove the rule (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys
+      recover within about a minute.
 
 ## Development
 
 ```bash
-cargo test                                   # unit tests (no network needed)
-cargo build --release --target <triple>
-node build.mjs <triple>                      # assembles dist/<uuid>.sdPlugin
+cargo fmt --check                            # what CI runs
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked                          # unit tests (no internet needed)
+cargo build --release --locked
+node build.mjs                               # assembles dist/<uuid>.sdPlugin for this machine
 cp -r dist/com.jfms7s.weather.sdPlugin ~/.config/opendeck/plugins/
 # restart OpenDeck, then work through the smoke-test checklist above
 ```
 
-The API response fixtures in `tests/fixtures/` are real Open-Meteo responses. The
-parser tests run against them.
+`node build.mjs <triple>...` packages binaries built with `--target <triple>`, and
+`node build.mjs --all` every target in the manifest (what a release ships).
+
+The API response fixtures in `tests/fixtures/` are real Open-Meteo responses (see
+`tests/fixtures/README.md`). The parser tests run against them.
+
+The action-list icons (`assets/icons/`) are drawn by the same code as the keys: their
+SVG sources in `assets/icon-src/` come from `src/glyphs.rs`. After changing a glyph,
+run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
+
+## Releasing
+
+1. Bump `version` in `Cargo.toml` and `Version` in `assets/manifest.json` together
+   (`node build.mjs` and CI fail if they differ).
+2. Run the smoke-test checklist and paste it, ticked, with the OpenDeck version and
+   device, into the release PR.
+3. After merging, tag the merge commit `vX.Y.Z` and push the tag. The release workflow
+   tests and builds it and creates a **draft** release with the bundle, `SHA256SUMS`
+   and a build-provenance attestation.
+4. Write the notes (including the ticked checklist) and publish the draft.
 
 ## Attribution
 

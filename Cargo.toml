@@ -2,6 +2,9 @@
 name = "opendeck-weather"
 version = "0.1.1"
 edition = "2024"
+# Let-chains (stable since 1.88), and several dependencies need 1.88 too.
+# CI checks the build on exactly this version.
+rust-version = "1.88"
 license = "MIT"
 description = "OpenDeck plugin: current weather, daily forecast and air quality on Stream Deck keys and dials"
 repository = "https://github.com/jfms7s/opendeck-weather"
@@ -21,4 +24,11 @@ base64 = "0.22"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
-tokio = { version = "1.48", features = ["test-util", "macros", "rt"] }
+tokio = { version = "1.48", features = ["test-util", "macros", "rt", "net", "io-util"] }
+
+[profile.release]
+# About a third smaller binary (measured 9.25 MB -> 6.04 MB). No
+# `panic = "abort"`: a panic in a spawned render task must stay contained.
+lto = true
+codegen-units = 1
+strip = true

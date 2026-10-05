@@ -1,146 +1,86 @@
 //! **Forecast**: one day of the 7-day forecast - high/low, condition and
 //! chance of rain.
 //!
-//! - Key: shows the configured day (tomorrow by default). Press to step to
-//!   the next day; it returns to the configured day on its own.
+//! - Key: shows the configured day (tomorrow by default) and its chance of
+//!   rain. Press to step to the next day; it returns to the configured day
+//!   on its own.
 //! - Dial: rotate to scroll through the days, press or tap the strip for
 //!   sunrise/sunset.
 
-use super::{CardAction, handle_inspector, interact, render_soon};
+use super::Behavior;
 use crate::card::Card;
-use crate::model::Settings;
-use crate::services::{Services, local_now};
-use crate::tracker::Tracker;
-use crate::views::{self, View};
+use crate::model::{Location, Settings};
+use crate::open_meteo::FetchError;
+use crate::services::Services;
+use crate::view_state::ForecastView;
+use crate::views;
 use async_trait::async_trait;
-use openaction::{Action, Instance, OpenActionResult};
-use serde_json::Value;
-use std::sync::Arc;
+use chrono::{DateTime, Utc};
 
-/// Open-Meteo's `forecast_days`; `views::forecast` wraps within however
-/// many of these are still ahead of "today".
-const DAYS: i32 = 7;
-
-#[derive(Clone)]
-pub struct ForecastAction {
-    services: Arc<Services>,
-    tracker: Arc<Tracker>,
-}
-
-impl ForecastAction {
-    pub fn new(services: Arc<Services>) -> Self {
-        Self {
-            services,
-            tracker: Arc::default(),
-        }
-    }
-}
-
-fn step_days(v: &mut View, days: i32) {
-    v.offset = (v.offset + days).rem_euclid(DAYS);
-    v.detail = false;
-}
-
-fn toggle_detail(v: &mut View) {
-    v.detail = !v.detail;
-}
+pub struct Forecast;
 
 #[async_trait]
-impl CardAction for ForecastAction {
-    fn tracker(&self) -> &Tracker {
-        &self.tracker
-    }
-
-    async fn card(&self, settings: &Settings, view: View) -> Card {
-        let Some(location) = &settings.location else {
-            return views::no_location();
-        };
-        match self.services.forecast(location, settings.units).await {
-            Ok(f) => views::forecast(&f, settings.day, view, local_now(&f))
-                .unwrap_or_else(|| views::no_data(&location.name)),
-            Err(e) => {
-                log::warn!("forecast for {} failed: {e}", location.name);
-                views::no_data(&location.name)
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl Action for ForecastAction {
+impl Behavior for Forecast {
     const UUID: &'static str = "com.jfms7s.weather.forecast";
-    type Settings = Settings;
+    type View = ForecastView;
 
-    async fn will_appear(&self, instance: &Instance, settings: &Settings) -> OpenActionResult<()> {
-        self.tracker.track(&instance.instance_id, settings.clone());
-        render_soon(self, instance);
-        Ok(())
+    fn key_press(view: ForecastView) -> ForecastView {
+        view.step(1)
     }
 
-    async fn did_receive_settings(
-        &self,
-        instance: &Instance,
+    fn dial_rotate(view: ForecastView, ticks: i16) -> ForecastView {
+        view.step(i32::from(ticks))
+    }
+
+    fn dial_press(view: ForecastView) -> ForecastView {
+        view.toggle_sun()
+    }
+
+    async fn card(
+        services: &Services,
+        location: &Location,
         settings: &Settings,
-    ) -> OpenActionResult<()> {
-        self.will_appear(instance, settings).await
-    }
-
-    async fn will_disappear(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        self.tracker.untrack(&instance.instance_id);
-        Ok(())
-    }
-
-    async fn key_up(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        interact(self, instance, |v| step_days(v, 1)).await
-    }
-
-    async fn dial_rotate(
-        &self,
-        instance: &Instance,
-        _: &Settings,
-        ticks: i16,
-        _pressed: bool,
-    ) -> OpenActionResult<()> {
-        interact(self, instance, |v| step_days(v, i32::from(ticks))).await
-    }
-
-    async fn dial_up(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        interact(self, instance, toggle_detail).await
-    }
-
-    async fn touch_tap(
-        &self,
-        instance: &Instance,
-        _: &Settings,
-        _position: (u16, u16),
-        _hold: bool,
-    ) -> OpenActionResult<()> {
-        interact(self, instance, toggle_detail).await
-    }
-
-    async fn send_to_plugin(
-        &self,
-        instance: &Instance,
-        _: &Settings,
-        payload: &Value,
-    ) -> OpenActionResult<()> {
-        handle_inspector(&self.services, instance, payload).await
+        view: ForecastView,
+        utc_now: DateTime<Utc>,
+    ) -> Result<Card, FetchError> {
+        let f = services.forecast(location, settings.units).await?;
+        let now = f.value.local_now(utc_now);
+        Ok(views::forecast(&f.value, settings.day, view, now, f.stale)
+            .unwrap_or_else(|| views::no_data(&location.name)))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::tests::sample_days;
 
     #[test]
-    fn stepping_wraps_in_both_directions_and_clears_details() {
-        let mut v = View {
-            offset: 6,
-            detail: true,
-        };
-        step_days(&mut v, 1);
-        assert_eq!(v, View::default());
-        step_days(&mut v, -1);
-        assert_eq!(v.offset, 6);
+    fn every_press_changes_the_card_when_fewer_than_seven_days_are_left() {
+        // A cached 7-day forecast served the day after it was fetched: only
+        // 6 days are still ahead of "today".
+        let f = sample_days(24, 7);
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 9, 25)
+            .unwrap()
+            .and_hms_opt(14, 40, 0)
+            .unwrap();
+        let label = |v| views::forecast(&f, 1, v, now, false).unwrap().label;
+        let mut v = ForecastView::default();
+        let mut labels = vec![label(v)];
+        for _ in 0..8 {
+            v = Forecast::key_press(v);
+            labels.push(label(v));
+        }
+        for pair in labels.windows(2) {
+            assert_ne!(pair[0], pair[1], "a press did nothing: {labels:?}");
+        }
+        // Rotating back from the resting day changes it too.
+        let back = Forecast::dial_rotate(ForecastView::default(), -1);
+        assert_ne!(label(back), labels[0]);
+    }
+
+    #[test]
+    fn a_dial_press_toggles_sunrise_and_sunset() {
+        assert!(Forecast::dial_press(ForecastView::default()).sun);
     }
 }
