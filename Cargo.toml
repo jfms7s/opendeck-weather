@@ -20,7 +20,7 @@ dashmap = "6"
 chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 simplelog = "0.12"
-base64 = "0.22"
+base64 = "0.23"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
