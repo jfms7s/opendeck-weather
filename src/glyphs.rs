@@ -3,6 +3,7 @@
 //! standalone document for a touch-strip pixmap (OpenDeck's strip renderer
 //! accepts an SVG string directly as a pixmap value).
 
+use crate::palette::{BACKGROUND, MUTED, STALE};
 use crate::wmo::Condition;
 
 const SUN: &str = "#facc15";
@@ -12,7 +13,6 @@ const DARK_CLOUD: &str = "#94a3b8";
 const RAIN: &str = "#60a5fa";
 const SNOW: &str = "#f0f9ff";
 const BOLT: &str = "#fbbf24";
-const MUTED: &str = "#6b7280";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Glyph {
@@ -151,16 +151,62 @@ fn weather_body(condition: Condition, is_day: bool) -> String {
     }
 }
 
-/// Standalone SVG document, for a touch-strip pixmap.
-pub fn svg(glyph: Glyph) -> String {
+/// A small clock in the top-right corner, drawn over a glyph whose data is
+/// older than it should be.
+pub fn stale_badge() -> String {
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{}</svg>"#,
+        r#"<circle cx="20" cy="4" r="3.6" fill="{BACKGROUND}" stroke="{STALE}" stroke-width="1.2"/><path d="M20 2.2V4l1.3 1" fill="none" stroke="{STALE}" stroke-width="1.1" stroke-linecap="round"/>"#
+    )
+}
+
+/// Wraps glyph elements as a standalone SVG document, for a touch-strip
+/// pixmap.
+pub fn document(body: &str) -> String {
+    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{body}</svg>"#)
+}
+
+/// Standalone SVG document for one glyph.
+#[cfg(test)]
+pub fn svg(glyph: Glyph) -> String {
+    document(&body(glyph))
+}
+
+/// The action-list icons in `assets/icons/` are these glyphs on the key
+/// background, with a 3-unit margin (a 30-unit canvas, unclipped). Their SVG sources live
+/// in `assets/icon-src/` (kept equal to this by a test) and are rasterized
+/// to PNG by `scripts/render-icons.sh`.
+#[cfg(test)]
+pub fn icon_document(glyph: Glyph) -> String {
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -3 30 30"><rect x="-3" y="-3" width="30" height="30" fill="{BACKGROUND}"/>{}</svg>
+"#,
         body(glyph)
     )
 }
 
+/// Which glyph each shipped icon is drawn from (file stem in assets/icons).
 #[cfg(test)]
-mod tests {
+pub fn icon_sources() -> [(&'static str, Glyph); 4] {
+    let partly_cloudy = Glyph::Weather {
+        condition: Condition::PartlyCloudy,
+        is_day: true,
+    };
+    [
+        ("icon", partly_cloudy),
+        ("weather", partly_cloudy),
+        (
+            "forecast",
+            Glyph::Weather {
+                condition: Condition::Showers,
+                is_day: true,
+            },
+        ),
+        ("airquality", Glyph::Ring(crate::views::AQI_GOOD)),
+    ]
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
 
     fn weather(condition: Condition, is_day: bool) -> String {
@@ -187,9 +233,116 @@ mod tests {
         assert!(svg(Glyph::Ring("#ef4444")).contains("#ef4444"));
     }
 
+    /// Minimal well-formedness check: tags balance, attributes are quoted,
+    /// and text holds no raw `<` or unescaped `&` - enough to catch a broken
+    /// format string or an escaping slip, which would draw a blank key.
+    pub(crate) fn assert_well_formed(svg: &str) {
+        let mut open: Vec<String> = Vec::new();
+        let mut rest = svg.trim();
+        while let Some(start) = rest.find('<') {
+            let text = &rest[..start];
+            assert!(!text.contains('>'), "stray '>' in text of {svg}");
+            for (i, _) in text.match_indices('&') {
+                let entity = &text[i..];
+                assert!(
+                    ["&amp;", "&lt;", "&gt;"]
+                        .iter()
+                        .any(|e| entity.starts_with(e)),
+                    "unescaped '&' in {svg}"
+                );
+            }
+            let end = rest[start..].find('>').expect("unclosed tag") + start;
+            let tag = &rest[start + 1..end];
+            assert_eq!(
+                tag.matches('"').count() % 2,
+                0,
+                "unbalanced quotes in <{tag}>"
+            );
+            assert!(!tag.contains('<'), "'<' inside <{tag}>");
+            if let Some(name) = tag.strip_prefix('/') {
+                assert_eq!(
+                    open.pop().as_deref(),
+                    Some(name.trim()),
+                    "mismatched </{name}> in {svg}"
+                );
+            } else if !tag.ends_with('/') {
+                let name = tag.split_whitespace().next().expect("empty tag");
+                open.push(name.to_string());
+            }
+            rest = &rest[end + 1..];
+        }
+        assert!(rest.trim().is_empty(), "trailing text in {svg}");
+        assert!(open.is_empty(), "unclosed {open:?} in {svg}");
+    }
+
+    fn every_glyph() -> Vec<Glyph> {
+        use Condition::*;
+        let conditions = [
+            Clear,
+            MostlyClear,
+            PartlyCloudy,
+            Overcast,
+            Fog,
+            Drizzle,
+            FreezingRain,
+            Rain,
+            Snow,
+            Showers,
+            Thunderstorm,
+            Unknown,
+        ];
+        let mut glyphs: Vec<Glyph> = conditions
+            .iter()
+            .flat_map(|&condition| [true, false].map(|is_day| Glyph::Weather { condition, is_day }))
+            .collect();
+        glyphs.extend([Glyph::Ring("#22c55e"), Glyph::Pin, Glyph::Offline]);
+        glyphs
+    }
+
     #[test]
-    fn every_glyph_is_a_standalone_svg_document() {
-        let s = svg(Glyph::Pin);
-        assert!(s.starts_with("<svg") && s.ends_with("</svg>"));
+    fn every_glyph_is_a_well_formed_svg_document() {
+        let all = every_glyph();
+        assert_eq!(all.len(), 12 * 2 + 3);
+        for glyph in all {
+            let s = svg(glyph);
+            assert!(s.starts_with("<svg") && s.ends_with("</svg>"), "{s}");
+            assert_well_formed(&s);
+            assert_well_formed(&document(&format!("{}{}", body(glyph), stale_badge())));
+        }
+    }
+
+    #[test]
+    fn the_well_formedness_check_catches_breakage() {
+        for broken in [
+            "<svg><circle></svg>",
+            "<svg><path d=\"M1/></svg>",
+            "<svg><text>a & b</text></svg>",
+            "<svg><text>a < b</text></svg>",
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| assert_well_formed(broken)).is_err(),
+                "{broken}"
+            );
+        }
+    }
+
+    #[test]
+    fn icon_sources_are_drawn_from_the_glyphs() {
+        // Regenerate with: cargo test -- --ignored write_icon_sources
+        for (name, glyph) in icon_sources() {
+            let path = format!("{}/assets/icon-src/{name}.svg", env!("CARGO_MANIFEST_DIR"));
+            let committed = std::fs::read_to_string(&path).unwrap_or_default();
+            assert_eq!(committed, icon_document(glyph), "{path} is out of date");
+        }
+    }
+
+    #[test]
+    #[ignore = "writes assets/icon-src/; run when a glyph changes"]
+    fn write_icon_sources() {
+        let dir = format!("{}/assets/icon-src", env!("CARGO_MANIFEST_DIR"));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, glyph) in icon_sources() {
+            std::fs::write(format!("{dir}/{name}.svg"), icon_document(glyph)).unwrap();
+        }
     }
 }

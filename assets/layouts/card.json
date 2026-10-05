@@ -12,7 +12,7 @@
 			"type": "text",
 			"rect": [80, 4, 116, 40],
 			"alignment": "left",
-			"color": "white",
+			"color": "#f9fafb",
 			"value": "--",
 			"font": { "size": 30, "weight": 700 }
 		},
@@ -21,7 +21,7 @@
 			"type": "text",
 			"rect": [80, 46, 116, 24],
 			"alignment": "left",
-			"color": "white",
+			"color": "#d1d5db",
 			"value": "",
 			"font": { "size": 16, "weight": 600 }
 		},

@@ -33,7 +33,7 @@
 			"UUID": "com.jfms7s.weather.forecast",
 			"Name": "Forecast",
 			"Icon": "icons/forecast",
-			"Tooltip": "One day of the 7-day forecast. Press to step through the days; on a dial, rotate to scroll days",
+			"Tooltip": "One day of the 7-day forecast with its chance of rain. Press to step through the days; on a dial, rotate to scroll days",
 			"Controllers": ["Keypad", "Encoder"],
 			"PropertyInspectorPath": "propertyInspector/index.html",
 			"States": [{ "Image": "icons/forecast" }],

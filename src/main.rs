@@ -4,20 +4,24 @@ mod card;
 mod glyphs;
 mod model;
 mod open_meteo;
+mod palette;
+mod scheduler;
 mod services;
 mod tracker;
+mod view_state;
 mod views;
 mod wmo;
 
-use actions::air_quality::AirQualityAction;
-use actions::forecast::ForecastAction;
-use actions::tick_loop;
-use actions::weather::WeatherAction;
-use openaction::{OpenActionResult, register_action, run};
+use actions::GlobalSettingsHandler;
+use openaction::OpenActionResult;
+use openaction::global_events::set_global_event_handler;
+use scheduler::Wake;
 use services::Services;
 use std::sync::Arc;
 
-#[tokio::main]
+// Handlers never block (network work is spawned) and the plugin is idle
+// almost all the time, so two workers are plenty.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> OpenActionResult<()> {
     simplelog::SimpleLogger::init(log::LevelFilter::Info, simplelog::Config::default())
         .expect("logger init");
@@ -25,17 +29,14 @@ async fn main() -> OpenActionResult<()> {
     // One cache shared by all actions: a Weather key and a Forecast dial for
     // the same place cost a single forecast request per refresh window.
     let services = Arc::new(Services::default());
+    let wake = Arc::new(Wake::default());
 
-    let weather = WeatherAction::new(services.clone());
-    let forecast = ForecastAction::new(services.clone());
-    let air_quality = AirQualityAction::new(services);
+    let actions = actions::register_all(&services, &wake).await;
+    tokio::spawn(scheduler::run(actions, wake.clone()));
+    set_global_event_handler(Box::leak(Box::new(GlobalSettingsHandler {
+        services,
+        wake,
+    })));
 
-    tokio::spawn(tick_loop(weather.clone()));
-    tokio::spawn(tick_loop(forecast.clone()));
-    tokio::spawn(tick_loop(air_quality.clone()));
-
-    register_action(weather).await;
-    register_action(forecast).await;
-    register_action(air_quality).await;
-    run(std::env::args().collect()).await
+    openaction::run(std::env::args().collect()).await
 }
