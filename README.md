@@ -6,9 +6,9 @@ plugin for Stream Deck. It has three actions - **Weather**, **Forecast** and **A
 Quality** - each assignable to a key or a dial. Data comes from
 [Open-Meteo](https://open-meteo.com): free, and no API key or account needed.
 
-Built for, and tested only with, OpenDeck on Linux (x86_64 and aarch64). The code
-has no Linux-specific parts, but OpenDeck on Windows and macOS has never been tried,
-so the manifest doesn't offer it there.
+Runs in OpenDeck on Linux (x86_64 and aarch64) and on macOS with Apple Silicon. The code
+has no platform-specific parts; Windows has never been tried, so the manifest doesn't
+offer it there.
 
 ## Actions
 
@@ -85,9 +85,21 @@ sha256sum -c SHA256SUMS
 gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather
 ```
 
+On macOS, check the download with `shasum -a 256 -c SHA256SUMS` instead.
+
 Then either double-click it (if your file manager associates the extension with
-OpenDeck) or unzip it into `~/.config/opendeck/plugins/` and restart OpenDeck (OpenDeck
-only loads plugins at startup).
+OpenDeck) or unzip it into OpenDeck's plugin folder and restart OpenDeck (OpenDeck
+only loads plugins at startup):
+
+- Linux: `~/.config/opendeck/plugins/`
+- macOS: `~/Library/Application Support/opendeck/plugins/`
+
+On macOS, a bundle unzipped by hand (e.g. in Finder) is marked as downloaded and
+Gatekeeper refuses to start the binary. Clear the mark once:
+
+```bash
+xattr -dr com.apple.quarantine ~/Library/Application\ Support/opendeck/plugins/com.jfms7s.weather.sdPlugin
+```
 
 ## Manual smoke-test checklist
 
@@ -121,6 +133,14 @@ Run this in a live OpenDeck + Stream Deck session before cutting a release:
       Remove the rule (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys
       recover within about a minute.
 
+On a Mac (Apple Silicon), additionally:
+
+- [ ] The release bundle installs through OpenDeck and every action above renders.
+- [ ] `xattr -l` on the installed `opendeck-weather-aarch64-apple-darwin` shows no
+      `com.apple.quarantine`.
+- [ ] Weather, Forecast and Air Quality refresh on keys and a dial; location search works.
+- [ ] With Wi-Fi off, keys keep their last data and recover after it comes back.
+
 ## Development
 
 ```bash
@@ -130,6 +150,7 @@ cargo test --locked                          # unit tests (no internet needed)
 cargo build --release --locked
 node build.mjs                               # assembles dist/<uuid>.sdPlugin for this machine
 cp -r dist/com.jfms7s.weather.sdPlugin ~/.config/opendeck/plugins/
+# (macOS: ~/Library/Application\ Support/opendeck/plugins/)
 # restart OpenDeck, then work through the smoke-test checklist above
 ```
 
@@ -147,8 +168,8 @@ run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
 
 1. Bump `version` in `Cargo.toml` and `Version` in `assets/manifest.json` together
    (`node build.mjs` and CI fail if they differ).
-2. Run the smoke-test checklist and paste it, ticked, with the OpenDeck version and
-   device, into the release PR.
+2. Run the smoke-test checklist on Linux and on a Mac and paste it, ticked, with the
+   OpenDeck version and device, into the release PR.
 3. After merging, tag the merge commit `vX.Y.Z` and push the tag. The release workflow
    tests and builds it and creates a **draft** release with the bundle, `SHA256SUMS`
    and a build-provenance attestation.
