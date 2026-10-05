@@ -1,6 +1,6 @@
 [package]
 name = "opendeck-weather"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 # Let-chains (stable since 1.88), and several dependencies need 1.88 too.
 # CI checks the build on exactly this version.
