@@ -2,8 +2,10 @@
 //! and dials showing the same place share one request per refresh window.
 //!
 //! - Fresh values (younger than `ttl`) are returned without a request.
-//! - Concurrent callers for the same key wait on one in-flight fetch
-//!   instead of each firing their own (per-key async lock).
+//! - Concurrent callers with nothing usable for a key wait on one in-flight
+//!   fetch instead of each firing their own (per-key async fetch guard);
+//!   callers with a usable value get it at once, so a press never waits
+//!   behind a refresh that hangs.
 //! - A failed fetch falls back to the last good value while it is younger
 //!   than `stale_after`, so a network blip doesn't blank every key.
 //! - After a failure, the key isn't retried for `retry_after` (counted from
@@ -32,7 +34,21 @@ struct Slot<V, E> {
     last_error: Option<(Instant, E)>,
 }
 
-type SharedSlot<V, E> = Arc<AsyncMutex<Slot<V, E>>>;
+/// One key's state and its fetch guard. `state` is a std mutex, only ever
+/// locked briefly and never across an `.await`; `fetching` is held for the
+/// whole fetch, so at most one request per key is in flight.
+struct SlotCell<V, E> {
+    state: Mutex<Slot<V, E>>,
+    fetching: AsyncMutex<()>,
+}
+
+impl<V, E> SlotCell<V, E> {
+    fn state(&self) -> std::sync::MutexGuard<'_, Slot<V, E>> {
+        self.state.lock().expect("cache slot lock poisoned")
+    }
+}
+
+type SharedSlot<V, E> = Arc<SlotCell<V, E>>;
 
 /// A value from the cache, and whether it is older than the TTL - served
 /// only because refreshing it failed - so callers can mark it as old.
@@ -60,12 +76,45 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         slots
             .entry(key.clone())
             .or_insert_with(|| {
-                Arc::new(AsyncMutex::new(Slot {
-                    value: None,
-                    last_error: None,
-                }))
+                Arc::new(SlotCell {
+                    state: Mutex::new(Slot {
+                        value: None,
+                        last_error: None,
+                    }),
+                    fetching: AsyncMutex::new(()),
+                })
             })
             .clone()
+    }
+
+    /// The last good value, if it is still young enough to show at `now`.
+    fn usable(&self, slot: &Slot<V, E>, now: Instant, stale: bool) -> Option<Cached<V>> {
+        slot.value
+            .as_ref()
+            .filter(|(at, _)| now.duration_since(*at) < self.policy.stale_after)
+            .map(|(_, v)| Cached {
+                value: v.clone(),
+                stale,
+            })
+    }
+
+    /// The answer when no fetch is due: the value is fresh, or the key is
+    /// backing off after a failure. `None` means it's time to fetch.
+    fn settled(&self, slot: &Slot<V, E>, now: Instant) -> Option<Result<Cached<V>, E>> {
+        if let Some((at, v)) = &slot.value
+            && now.duration_since(*at) < self.policy.ttl
+        {
+            return Some(Ok(Cached {
+                value: v.clone(),
+                stale: false,
+            }));
+        }
+        if let Some((at, e)) = &slot.last_error
+            && now.duration_since(*at) < self.policy.retry_after
+        {
+            return Some(self.usable(slot, now, true).ok_or_else(|| e.clone()));
+        }
+        None
     }
 
     pub async fn get<F, Fut>(&self, key: &K, fetch: F) -> Result<Cached<V>, E>
@@ -73,51 +122,60 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<V, E>>,
     {
-        let slot = self.slot(key);
-        let mut slot = slot.lock().await;
-        let now = Instant::now();
-        let p = self.policy;
+        let cell = self.slot(key);
 
-        let usable = |slot: &Slot<V, E>| {
-            slot.value
-                .as_ref()
-                .filter(|(at, _)| now.duration_since(*at) < p.stale_after)
-                .map(|(_, v)| Cached {
-                    value: v.clone(),
-                    stale: true,
-                })
+        let guard = {
+            let state = cell.state();
+            let now = Instant::now();
+            if let Some(answer) = self.settled(&state, now) {
+                return answer;
+            }
+            match cell.fetching.try_lock() {
+                Ok(guard) => Some(guard),
+                Err(_) => {
+                    // Someone else is fetching. Don't wait for them if there
+                    // is something to show; it's gray only if the previous
+                    // attempt failed, so a healthy refresh doesn't flash gray.
+                    let stale = state.last_error.is_some();
+                    if let Some(cached) = self.usable(&state, now, stale) {
+                        return Ok(cached);
+                    }
+                    None
+                }
+            }
+        };
+        let _guard = match guard {
+            Some(guard) => guard,
+            None => cell.fetching.lock().await,
         };
 
-        if let Some((at, v)) = &slot.value
-            && now.duration_since(*at) < p.ttl
-        {
-            return Ok(Cached {
-                value: v.clone(),
-                stale: false,
-            });
-        }
-        if let Some((at, e)) = &slot.last_error
-            && now.duration_since(*at) < p.retry_after
-        {
-            return usable(&slot).ok_or_else(|| e.clone());
-        }
+        // Another caller may have just finished a fetch while we waited.
+        let started = {
+            let state = cell.state();
+            let now = Instant::now();
+            if let Some(answer) = self.settled(&state, now) {
+                return answer;
+            }
+            now
+        };
 
         // Back off from when this attempt started: a request that hangs until
         // its timeout must not push the next retry past the next refresh.
-        let started = Instant::now();
-        match fetch().await {
+        let result = fetch().await;
+        let mut state = cell.state();
+        match result {
             Ok(v) => {
                 let v = Arc::new(v);
-                slot.value = Some((Instant::now(), v.clone()));
-                slot.last_error = None;
+                state.value = Some((Instant::now(), v.clone()));
+                state.last_error = None;
                 Ok(Cached {
                     value: v,
                     stale: false,
                 })
             }
             Err(e) => {
-                slot.last_error = Some((started, e.clone()));
-                let fallback = usable(&slot);
+                state.last_error = Some((started, e.clone()));
+                let fallback = self.usable(&state, started, true);
                 if fallback.is_some() {
                     // Callers only see the error once the stale value runs
                     // out, so say here that it's being papered over.
@@ -245,6 +303,64 @@ mod tests {
         let (a, b) = tokio::join!(cache.get(&"k", fetch), cache.get(&"k", fetch));
         assert_eq!((*a.unwrap().value, *b.unwrap().value), (7, 7));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// Starts a refresh that hangs for 10 s and then fails, and 2 s into it a
+    /// second `get` (a press). Returns what the press got and how long it took.
+    async fn press_during_a_hanging_refresh(
+        cache: &TestCache,
+        calls: &AtomicU32,
+    ) -> (Result<(u32, bool), String>, Duration) {
+        let hanging_refresh = cache.get(&"k", || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            Err::<u32, _>("timeout".to_string())
+        });
+        let press = async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let started = Instant::now();
+            let got = cache
+                .get(&"k", || async {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Ok::<_, String>(9)
+                })
+                .await
+                .map(|c| (*c.value, c.stale));
+            (got, started.elapsed())
+        };
+        let (refresh, press) = tokio::join!(hanging_refresh, press);
+        assert!(refresh.is_ok(), "the refresh falls back to the old value");
+        press
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_caller_with_a_usable_value_does_not_wait_for_an_in_flight_fetch() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        let (got, waited) = press_during_a_hanging_refresh(&cache, &calls).await;
+        assert_eq!(waited, Duration::ZERO, "the press waited for the fetch");
+        assert_eq!(
+            got,
+            Ok((1, false)),
+            "a healthy refresh isn't shown as stale"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "the press didn't fetch");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_a_failed_attempt_a_caller_that_does_not_wait_gets_a_stale_value() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        assert_eq!(get(&cache, &calls, Err("down".into())).await, Ok(1));
+        tokio::time::advance(Duration::from_secs(61)).await; // past retry_after
+        let (got, waited) = press_during_a_hanging_refresh(&cache, &calls).await;
+        assert_eq!(waited, Duration::ZERO, "the press waited for the fetch");
+        assert_eq!(got, Ok((1, true)));
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "the press didn't fetch");
     }
 
     #[tokio::test(start_paused = true)]
