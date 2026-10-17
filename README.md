@@ -128,10 +128,12 @@ Run this in a live OpenDeck + Stream Deck session before cutting a release:
       data. A key given a new, never-fetched location shows "No data". After the network
       comes back, the keys recover within about a minute.
 - [ ] With requests hanging instead of failing
-      (`sudo iptables -A OUTPUT -p tcp --dport 443 -j DROP`), presses and turns still
-      respond at once. After about 10 minutes the values turn gray with a clock badge.
-      Remove the rule (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys
-      recover within about a minute.
+      (`sudo iptables -A OUTPUT -p tcp --dport 443 -j DROP`), after about 10 minutes
+      the values turn gray with a clock badge. With the rule still in place, press keys
+      and turn dials repeatedly over about a minute: every refresh now hangs, and
+      presses and turns respond at once even then. Remove the rule
+      (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys recover within
+      about a minute.
 
 On a Mac (Apple Silicon), additionally - with the draft release's bundle (Releasing,
 step 4):
