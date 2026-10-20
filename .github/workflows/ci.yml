@@ -39,7 +39,6 @@ jobs:
           node-version: 24
       - run: node build.mjs
       # Only reached when every step above passed, so a red test leaves no fragment.
-      # macOS-only cfg code isn't compiled here: a known coverage gap.
       - name: Collect coverage fragment (eng-metrics-lab)
         run: |
           mkdir -p .quality
