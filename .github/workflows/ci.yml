@@ -38,6 +38,8 @@ jobs:
         with:
           node-version: 24
       - run: node build.mjs
+      # The property inspector's script, against a stub DOM (no dependencies).
+      - run: node --test tests/*.test.mjs
       # The Release workflow builds the draft's notes this way; a README edit
       # that breaks the smoke-checklist markers fails here, not on the tag.
       - name: Draft release notes build from the README checklist

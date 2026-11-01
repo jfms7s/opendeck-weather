@@ -175,6 +175,7 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked                          # unit tests (no internet needed)
 cargo build --release --locked
 node build.mjs                               # assembles dist/<uuid>.sdPlugin for this machine
+node --test tests/*.test.mjs                 # the property inspector's script, no deps
 cp -r dist/com.jfms7s.weather.sdPlugin ~/.config/opendeck/plugins/
 # (macOS: ~/Library/Application\ Support/opendeck/plugins/)
 # restart OpenDeck, then work through the smoke-test checklist above
