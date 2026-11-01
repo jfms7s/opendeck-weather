@@ -22,6 +22,7 @@ jobs:
         with:
           toolchain: 1.98.1
           components: rustfmt, clippy, llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -33,7 +34,12 @@ jobs:
         run: cargo llvm-cov --locked --lcov --output-path "$RUNNER_TEMP/coverage-rust.lcov"
       # The release's packaging checks (Cargo/manifest version drift,
       # CodePaths naming), run on every PR instead of only at release time.
+      # Thin LTO keeps PR builds quick; the Release workflow keeps Cargo.toml's
+      # fat-LTO profile for what ships.
       - run: cargo build --release --locked
+        env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -67,6 +73,7 @@ jobs:
         with:
           toolchain: 1.98.1
           targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install the aarch64 C toolchain (aws-lc-sys compiles C)
         run: |
           sudo apt-get update
@@ -87,9 +94,15 @@ jobs:
         with:
           toolchain: 1.98.1
           components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      # Thin LTO keeps PR builds quick; the Release workflow keeps Cargo.toml's
+      # fat-LTO profile for what ships.
       - run: cargo build --release --locked
+        env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       # The release's build-macos checks, here so a PR catches them before a tag.
       - name: Check it is a signed arm64 binary that starts
         run: |
@@ -117,6 +130,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-01
         with:
           toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo check --locked --all-targets
 
   # The same MSRV check on macOS, as its own job: the master ruleset requires
@@ -132,6 +146,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-01
         with:
           toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo check --locked --all-targets
 
   advisories:
