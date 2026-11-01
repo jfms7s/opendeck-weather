@@ -57,5 +57,9 @@ assert checks), serve stale data up to 3 h. Views revert 15 s after the last tou
 ## Releasing
 
 Tag `vX.Y.Z` -> the release workflow builds a **draft** release with the bundle,
-`SHA256SUMS` and a provenance attestation. Run the README smoke-test checklist and
-paste it into the notes before publishing.
+`SHA256SUMS` and a provenance attestation; its notes start with the README smoke-test
+checklist, unticked, under an `UNVERIFIED` line (`scripts/release-body.mjs`, from the
+README's `smoke-checklist` markers - keep them). The draft's notes are the one place the
+ticked checklist goes; the owner runs it on Linux and a Mac and publishes with
+`scripts/publish-release.sh vX.Y.Z`, which refuses an `UNVERIFIED` draft. Agents stop at
+a verified draft.

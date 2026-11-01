@@ -103,7 +103,16 @@ xattr -dr com.apple.quarantine ~/Library/Application\ Support/opendeck/plugins/c
 
 ## Manual smoke-test checklist
 
-Run this in a live OpenDeck + Stream Deck session before cutting a release:
+Run this in a live OpenDeck + Stream Deck session on Linux, and the Mac list on a Mac,
+before publishing a release. Record the result per item: pass, fail or **not run** (with
+why). Each release's draft notes start with this list, unticked, under an `UNVERIFIED`
+line: tick or annotate each item there, fill in the run details and delete the
+`UNVERIFIED` line before publishing. The full run (date, OpenDeck version, platform,
+Stream Deck model, per-item notes) goes in that release's smoke log,
+`releases/vX.Y.Z-smoke.md` in the maintainer's project notes (kept outside this
+repository), which the release notes link.
+
+<!-- smoke-checklist:start (scripts/release-body.mjs copies everything up to the end marker into each draft release) -->
 
 - [ ] A new Weather key shows a map pin and "Set location".
 - [ ] In the property inspector, searching "Lisbon" lists several matches, including
@@ -144,6 +153,8 @@ step 4):
 - [ ] Weather, Forecast and Air Quality refresh on keys and a dial; location search works.
 - [ ] With Wi-Fi off, keys keep their last data and recover after it comes back.
 
+<!-- smoke-checklist:end -->
+
 ## Development
 
 ```bash
@@ -171,14 +182,24 @@ run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
 
 1. Bump `version` in `Cargo.toml` and `Version` in `assets/manifest.json` together
    (`node build.mjs` and CI fail if they differ).
-2. Run the smoke-test checklist on a local build (`node build.mjs`) and paste it,
-   ticked, with the OpenDeck version and device, into the release PR.
-3. After merging, tag the merge commit `vX.Y.Z` and push the tag. The release workflow
-   tests and builds it and creates a **draft** release with the bundle, `SHA256SUMS`
-   and a build-provenance attestation.
-4. Install the draft's bundle through OpenDeck on Linux and on a Mac, and run the
-   checklist's "On a Mac" items there.
-5. Write the notes (including the ticked checklists) and publish the draft.
+2. Open a `chore: release X.Y.Z` PR with that bump and merge it. The smoke test runs
+   on the draft's bundle (step 4), not in the PR.
+3. Tag the merge commit `vX.Y.Z` and push the tag. The release workflow tests and builds
+   it and creates a **draft** release with the bundle, `SHA256SUMS` and a
+   build-provenance attestation. The draft's notes start with the smoke-test checklist
+   above, unticked, under an `UNVERIFIED` line (`scripts/release-body.mjs`), followed by
+   the generated change list.
+4. Install the draft's bundle through OpenDeck on Linux and on a Mac, run the checklist,
+   write the release's smoke log, tick or annotate every item in the draft's notes, link
+   the log and delete the `UNVERIFIED` line. The release notes are the record; a draft
+   whose notes still say `UNVERIFIED` is not published.
+5. Publish with `scripts/publish-release.sh vX.Y.Z`, which refuses while the notes say
+   `UNVERIFIED` or while GitHub's immutable releases setting is off. Ansible installs the
+   latest *published* release, so publishing is what deploys it. Published releases are
+   immutable: the assets and the tag are frozen, so a broken release is fixed with a new
+   version, never by replacing an asset
+   (`gh api repos/jfms7s/opendeck-weather/immutable-releases` must report
+   `"enabled":true`; a release published while it is off stays mutable).
 
 ## Attribution
 

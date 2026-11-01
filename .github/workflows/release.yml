@@ -3,8 +3,13 @@ name: Release
 # builds and tests the tagged commit (Linux binaries on Ubuntu, the macOS
 # one on a macOS runner), then creates a *draft* release with the bundle,
 # SHA256SUMS and a build-provenance attestation attached, so a release is
-# never visible without its asset. Publish the draft by hand once the
-# README's smoke-test checklist has been run and pasted into its notes.
+# never visible without its asset. The draft's notes start with the README's
+# smoke-test checklist, unticked, under an UNVERIFIED line
+# (scripts/release-body.mjs). Run that checklist on Linux and a Mac, record it
+# in the notes, then publish with scripts/publish-release.sh (see "Releasing").
+# Publishing freezes it: immutable releases are meant to be on for this
+# repository, so a published release's assets and tag can't be replaced - fix
+# a bad release with a new version.
 on:
   push:
     tags: ["v*"]
@@ -116,12 +121,17 @@ jobs:
           unzip -Z opendeck-weather.streamDeckPlugin | grep -E '^-rwx.*opendeck-weather-aarch64-apple-darwin$'
           sha256sum opendeck-weather.streamDeckPlugin > SHA256SUMS
           cat SHA256SUMS
+      # Written after the bundle is zipped and checksummed, so it is in
+      # neither; it only becomes the draft's notes.
+      - name: Write the draft's notes (the README smoke checklist, unticked)
+        run: node scripts/release-body.mjs > RELEASE_BODY.md
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release
           path: |
             opendeck-weather.streamDeckPlugin
             SHA256SUMS
+            RELEASE_BODY.md
           if-no-files-found: error
 
   publish:
@@ -139,11 +149,12 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: opendeck-weather.streamDeckPlugin
+      # --generate-notes appends GitHub's change list after RELEASE_BODY.md.
       - name: Create a draft release with the bundle and checksums
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
-            --title "$GITHUB_REF_NAME" --generate-notes \
+            --title "$GITHUB_REF_NAME" --notes-file RELEASE_BODY.md --generate-notes \
             opendeck-weather.streamDeckPlugin SHA256SUMS
