@@ -833,6 +833,30 @@ pub(crate) mod tests {
 
     #[test]
     fn us_aqi_breakpoints() {
+        for (scale, at, name) in [
+            (AqiScale::Us, 50.0, "Good"),
+            (AqiScale::Us, 51.0, "Moderate"),
+            (AqiScale::Us, 100.0, "Moderate"),
+            (AqiScale::Us, 101.0, "Unhealthy (SG)"),
+            (AqiScale::Us, 150.0, "Unhealthy (SG)"),
+            (AqiScale::Us, 151.0, "Unhealthy"),
+            (AqiScale::Us, 200.0, "Unhealthy"),
+            (AqiScale::Us, 201.0, "Very unhealthy"),
+            (AqiScale::Us, 300.0, "Very unhealthy"),
+            (AqiScale::Us, 301.0, "Hazardous"),
+            (AqiScale::European, 20.0, "Good"),
+            (AqiScale::European, 21.0, "Fair"),
+            (AqiScale::European, 40.0, "Fair"),
+            (AqiScale::European, 41.0, "Moderate"),
+            (AqiScale::European, 60.0, "Moderate"),
+            (AqiScale::European, 61.0, "Poor"),
+            (AqiScale::European, 80.0, "Poor"),
+            (AqiScale::European, 81.0, "Very poor"),
+            (AqiScale::European, 100.0, "Very poor"),
+            (AqiScale::European, 101.0, "Extremely poor"),
+        ] {
+            assert_eq!(aqi_category(scale, at).0, name, "{scale:?} {at}");
+        }
         assert_eq!(aqi_category(AqiScale::Us, 50.0).0, "Good");
         assert_eq!(aqi_category(AqiScale::Us, 51.0).0, "Moderate");
         assert_eq!(aqi_category(AqiScale::Us, 151.0).0, "Unhealthy");

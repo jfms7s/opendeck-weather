@@ -39,15 +39,21 @@ pub struct OpenMeteo {
     client: reqwest::Client,
 }
 
+/// Everything about the client but `https_only`, so tests can talk to a
+/// plain-HTTP loopback server with otherwise the shipped settings.
+fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .user_agent(concat!("opendeck-weather/", env!("CARGO_PKG_VERSION")))
+        // None of the endpoints is expected to redirect.
+        .redirect(reqwest::redirect::Policy::none())
+}
+
 impl Default for OpenMeteo {
     fn default() -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(REQUEST_TIMEOUT)
-            .user_agent(concat!("opendeck-weather/", env!("CARGO_PKG_VERSION")))
-            // The coordinates travel in the query string: never over plain
-            // HTTP, and none of the endpoints is expected to redirect.
+        let client = client_builder()
+            // The coordinates travel in the query string: never over plain HTTP.
             .https_only(true)
-            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("reqwest client with static config");
         Self { client }
@@ -518,6 +524,15 @@ mod tests {
     /// A local plain-HTTP server that answers every request with a tiny
     /// JSON body, and counts the connections it accepted.
     async fn plain_http_server() -> (Url, Arc<AtomicU32>) {
+        canned_server(|_| {
+            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}".to_vec()
+        })
+        .await
+    }
+
+    /// A loopback HTTP server answering every connection with
+    /// `response(its port)`, counting connections.
+    async fn canned_server(response: fn(u16) -> Vec<u8>) -> (Url, Arc<AtomicU32>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -528,9 +543,7 @@ mod tests {
                 counter.fetch_add(1, Ordering::SeqCst);
                 let mut buf = [0u8; 4096];
                 let _ = socket.read(&mut buf).await;
-                let _ = socket
-                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
-                    .await;
+                let _ = socket.write_all(&response(addr.port())).await;
             }
         });
         let url = format!(
@@ -554,6 +567,60 @@ mod tests {
         for secret in ["38.72509", "-9.1498", "Rua", "127.0.0.1"] {
             assert!(!err.contains(secret), "{secret} leaked into {err:?}");
         }
+    }
+
+    /// The shipped client minus `https_only`, so it can reach a loopback server.
+    fn plain_client() -> OpenMeteo {
+        OpenMeteo {
+            client: client_builder().build().unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_error_status_is_an_error() {
+        let (url, _) = canned_server(|_| {
+            b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                .to_vec()
+        })
+        .await;
+        let err = plain_client().get(url).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request failed: HTTP 503 Service Unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_redirect_is_not_followed() {
+        let (url, accepted) = canned_server(|port| {
+            format!(
+                "HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:{port}/again\r\n\
+                 content-length: 0\r\nconnection: close\r\n\r\n"
+            )
+            .into_bytes()
+        })
+        .await;
+        let err = plain_client().get(url).await.unwrap_err();
+        assert_eq!(err.to_string(), "request failed: HTTP 302 Found");
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "followed the redirect");
+    }
+
+    #[tokio::test]
+    async fn a_refused_connection_does_not_echo_the_url() {
+        let url = Url::parse("https://127.0.0.1:1/v1/forecast?latitude=38.72509&longitude=-9.1498")
+            .unwrap();
+        let err = OpenMeteo::default().get(url).await.unwrap_err().to_string();
+        assert_eq!(err, "request failed: could not connect");
+        for secret in ["127.0.0.1", "38.72509", "-9.1498", ":1"] {
+            assert!(!err.contains(secret), "{secret} leaked into {err:?}");
+        }
+    }
+
+    #[test]
+    fn the_request_timeout_holds() {
+        // A hanging request gives up well inside a refresh period, so the
+        // README hang step recovers "within about a minute".
+        assert_eq!(REQUEST_TIMEOUT, Duration::from_secs(10));
     }
 
     #[test]
