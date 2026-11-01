@@ -15,12 +15,20 @@ offer it there.
 ### Weather
 
 Current conditions at your location: an icon (day and night variants), the temperature,
-and the sky condition.
+and the sky condition, plus when rain next starts or stops in the coming 12 hours, from
+the hourly forecast: `Rain at 16:00` when it is dry now, `Rain until 18:00` when it is
+raining, `Dry next 12h` when every hour is forecast dry. An hour counts as wet when its
+forecast is rain, drizzle, snow, showers or thunderstorms, or its chance of rain is at
+least 50%. When the forecast doesn't reach far enough to tell (no chance given for an
+hour, or rain all 12 hours), the card shows the location name and condition as before.
 
-- **Key** - press for today's high/low and the "feels like" temperature.
-- **Dial** - rotate to scroll the hourly forecast up to 24 hours ahead (time, temperature,
-  chance of rain). Press the dial or tap the strip for the details screen: high/low,
-  feels-like, wind and humidity.
+- **Key** - the rain line replaces the condition only when rain starts or stops within
+  12 hours, so a dry day still shows the sky. Press for today's high/low and the "feels
+  like" temperature.
+- **Dial** - the rain line replaces the location name under the condition. Rotate to
+  scroll the hourly forecast up to 24 hours ahead (time, temperature, chance of rain).
+  Press the dial or tap the strip for the details screen: high/low, feels-like, wind
+  and humidity.
 
 ### Forecast
 
@@ -120,6 +128,10 @@ repository), which the release notes link.
       updates the key within a few seconds.
 - [ ] Searching nonsense (`zzzqqq`) shows "No matches".
 - [ ] Switching Units to Imperial changes the key to °F.
+- [ ] At rest, a Weather dial shows `Rain at HH:MM`, `Rain until HH:MM` or `Dry next 12h`
+      under the condition, matching the hourly forecast's chance of rain when rotated;
+      a Weather key shows the same `Rain at` / `Rain until` line instead of the
+      condition only when rain starts or stops within 12 hours.
 - [ ] Pressing the Weather key shows high/low and "Feels ..."; about 15s later it goes
       back to the current temperature.
 - [ ] On a dial, rotating Weather clockwise steps through the hours (the label shows the

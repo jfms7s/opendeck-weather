@@ -69,6 +69,96 @@ fn current_hour(f: &Forecast, now: NaiveDateTime) -> Option<(usize, &Hour)> {
         .find(|(_, h)| h.time + Duration::hours(1) > now)
 }
 
+/// Chance of precipitation (percent) from which an hour counts as wet.
+const RAIN_THRESHOLD: f64 = 50.0;
+/// How far ahead the resting Weather card looks for rain starting or stopping.
+const RAIN_LOOKAHEAD_HOURS: usize = 12;
+
+/// When rain next starts or stops, from the hourly forecast.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RainOutlook {
+    /// Dry now; rain starts in the hour beginning at this time.
+    StartsAt(NaiveDateTime),
+    /// Raining now; the first dry hour begins at this time.
+    StopsAt(NaiveDateTime),
+    /// Dry now, and every hour in the lookahead is known to be dry.
+    Dry,
+    /// Not enough data to say: an hour with no probability (past the model's
+    /// horizon), a gap in the series, or rain lasting the whole lookahead.
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wetness {
+    Wet,
+    Dry,
+    Unknown,
+}
+
+/// Wet if its condition is precipitation or the chance reaches the
+/// threshold; dry only when the chance is known. A missing chance never
+/// passes for dry.
+fn wetness(h: &Hour) -> Wetness {
+    match h.precipitation_probability {
+        _ if Condition::from_code(h.code).is_precipitation() => Wetness::Wet,
+        Some(p) if p >= RAIN_THRESHOLD => Wetness::Wet,
+        Some(_) => Wetness::Dry,
+        None => Wetness::Unknown,
+    }
+}
+
+/// Scans the hours after the one containing `now`, up to the lookahead.
+/// Whether it is raining now comes from `observed_code` (the observation the
+/// card shows) when there is one, else from the current hour's forecast, so
+/// the line never contradicts the condition on the card.
+fn next_rain(f: &Forecast, now: NaiveDateTime, observed_code: Option<u8>) -> RainOutlook {
+    let Some((i, current)) = current_hour(f, now) else {
+        return RainOutlook::Unknown;
+    };
+    let raining = match observed_code {
+        Some(code) => Condition::from_code(code).is_precipitation(),
+        None => match wetness(current) {
+            Wetness::Wet => true,
+            Wetness::Dry => false,
+            Wetness::Unknown => return RainOutlook::Unknown,
+        },
+    };
+    let (looking_for, found): (Wetness, fn(NaiveDateTime) -> RainOutlook) = if raining {
+        (Wetness::Dry, RainOutlook::StopsAt)
+    } else {
+        (Wetness::Wet, RainOutlook::StartsAt)
+    };
+    for ahead in 1..=RAIN_LOOKAHEAD_HOURS {
+        let expected = current.time + Duration::hours(ahead as i64);
+        // The parser drops malformed entries: a missing hour is unknown.
+        let w = match f.hourly.get(i + ahead) {
+            Some(h) if h.time == expected => wetness(h),
+            _ => Wetness::Unknown,
+        };
+        if w == looking_for {
+            return found(expected);
+        }
+        if w == Wetness::Unknown {
+            return RainOutlook::Unknown;
+        }
+    }
+    if raining {
+        RainOutlook::Unknown
+    } else {
+        RainOutlook::Dry
+    }
+}
+
+/// The rain line, or `None` when the outlook is unknown.
+fn rain_line(outlook: RainOutlook) -> Option<String> {
+    match outlook {
+        RainOutlook::StartsAt(t) => Some(format!("Rain at {}", t.format("%H:%M"))),
+        RainOutlook::StopsAt(t) => Some(format!("Rain until {}", t.format("%H:%M"))),
+        RainOutlook::Dry => Some(format!("Dry next {RAIN_LOOKAHEAD_HOURS}h")),
+        RainOutlook::Unknown => None,
+    }
+}
+
 /// Index of the first daily entry for `now`'s local date or later.
 fn today_index(f: &Forecast, now: NaiveDateTime) -> Option<usize> {
     f.daily.iter().position(|d| d.date >= now.date())
@@ -112,13 +202,23 @@ pub fn weather(
         (None, Some((_, h))) => (h.code, h.is_day, h.temperature),
         (None, None) => return no_data(location_name),
     };
-    Card::new(
+    // The rain line takes the dial's location line whenever there is
+    // something to say; a key gives up the condition only for rain starting
+    // or stopping, so a dry day still shows the sky there.
+    let outlook = next_rain(f, now, observed.map(|c| c.code));
+    let card = Card::new(
         weather_glyph(code, is_day),
         temp(temperature),
         condition(code),
-        location_name,
-    )
-    .marked_stale(stale)
+        rain_line(outlook).unwrap_or_else(|| location_name.to_string()),
+    );
+    let card = if matches!(outlook, RainOutlook::StartsAt(_) | RainOutlook::StopsAt(_)) {
+        let line = card.detail.clone();
+        card.with_key_label(line)
+    } else {
+        card
+    };
+    card.marked_stale(stale)
 }
 
 /// High/low, feels-like, wind and humidity - needs the current conditions.
@@ -307,6 +407,19 @@ pub(crate) mod tests {
         }
     }
 
+    /// `sample()` with no rain in its hourly series: hour 16 is clear.
+    fn dry_sample() -> Forecast {
+        let mut f = sample();
+        set_hour(&mut f, 16, 0, Some(0.0));
+        f
+    }
+
+    /// Sets hour `h` (counted from 00:00 on the 25th) of `f`'s hourly series.
+    fn set_hour(f: &mut Forecast, h: usize, code: u8, probability: Option<f64>) {
+        f.hourly[h].code = code;
+        f.hourly[h].precipitation_probability = probability;
+    }
+
     pub(crate) fn now() -> NaiveDateTime {
         at(25, 14, 40)
     }
@@ -339,14 +452,179 @@ pub(crate) mod tests {
 
     #[test]
     fn weather_at_rest_shows_current_temperature_and_condition() {
-        let c = lisbon(&sample(), WeatherView::Now, now());
+        let c = lisbon(&dry_sample(), WeatherView::Now, now());
         assert_eq!(c.value, "22°");
         assert_eq!(c.label, "Partly cloudy");
-        assert_eq!(c.detail, "Lisbon");
+        assert_eq!(c.detail, "Dry next 12h");
         let key = key_svg(&c);
         assert!(
             key.contains(">22°<") && key.contains(">Partly cloudy<"),
             "{key}"
+        );
+    }
+
+    #[test]
+    fn rain_starting_soon_shows_on_the_dial_and_the_key() {
+        // Rain (code 61) at 16:00; it is 14:40 and partly cloudy.
+        let c = lisbon(&sample(), WeatherView::Now, now());
+        assert_eq!(c.label, "Partly cloudy");
+        assert_eq!(c.detail, "Rain at 16:00");
+        let key = key_svg(&c);
+        assert!(key.contains(">Rain at 16:00<"), "{key}");
+        assert!(!key.contains(">Partly cloudy<"), "{key}");
+    }
+
+    #[test]
+    fn rain_stopping_shows_until_when() {
+        let mut f = sample();
+        f.current.as_mut().unwrap().code = 63;
+        for h in 14..=17 {
+            set_hour(&mut f, h, 61, Some(80.0));
+        }
+        let c = lisbon(&f, WeatherView::Now, now());
+        assert_eq!(c.label, "Rain");
+        assert_eq!(c.detail, "Rain until 18:00");
+        assert!(key_svg(&c).contains(">Rain until 18:00<"));
+    }
+
+    #[test]
+    fn a_dry_day_keeps_the_condition_on_the_key() {
+        let c = lisbon(&dry_sample(), WeatherView::Now, now());
+        assert_eq!(c.key_line(), "Partly cloudy");
+        assert_eq!(c.detail, "Dry next 12h");
+    }
+
+    #[test]
+    fn an_unknown_outlook_keeps_the_location_and_condition() {
+        let mut f = dry_sample();
+        set_hour(&mut f, 15, 0, None);
+        let c = lisbon(&f, WeatherView::Now, now());
+        assert_eq!(c.detail, "Lisbon");
+        assert_eq!(c.key_line(), "Partly cloudy");
+    }
+
+    #[test]
+    fn a_stale_card_still_gets_the_rain_line_from_the_forecast() {
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Now,
+            now(),
+            true,
+        );
+        assert!(c.stale);
+        assert_eq!(c.detail, "Rain at 16:00");
+    }
+
+    #[test]
+    fn next_rain_finds_the_first_wet_hour_when_dry_now() {
+        assert_eq!(
+            next_rain(&sample(), now(), Some(2)),
+            RainOutlook::StartsAt(at(25, 16, 0))
+        );
+    }
+
+    #[test]
+    fn next_rain_finds_the_first_dry_hour_when_raining_now() {
+        let mut f = sample();
+        for h in 14..=17 {
+            set_hour(&mut f, h, 61, Some(90.0));
+        }
+        assert_eq!(
+            next_rain(&f, now(), None),
+            RainOutlook::StopsAt(at(25, 18, 0))
+        );
+    }
+
+    #[test]
+    fn next_rain_is_dry_when_every_hour_in_the_window_is_known_dry() {
+        assert_eq!(next_rain(&dry_sample(), now(), Some(2)), RainOutlook::Dry);
+        assert_eq!(rain_line(RainOutlook::Dry).unwrap(), "Dry next 12h");
+    }
+
+    #[test]
+    fn an_unknown_chance_before_any_rain_is_unknown_not_dry() {
+        let mut f = sample();
+        set_hour(&mut f, 15, 2, None);
+        assert_eq!(next_rain(&f, now(), Some(2)), RainOutlook::Unknown);
+        assert_eq!(rain_line(RainOutlook::Unknown), None);
+    }
+
+    #[test]
+    fn rain_past_the_lookahead_does_not_count() {
+        // The window is the 12 hours after the current one (14:00): up to
+        // 02:00 on the 26th, which is hour 26 of the series.
+        let mut f = dry_sample();
+        set_hour(&mut f, 27, 61, Some(90.0));
+        assert_eq!(next_rain(&f, now(), Some(2)), RainOutlook::Dry);
+        set_hour(&mut f, 26, 61, Some(90.0));
+        assert_eq!(
+            next_rain(&f, now(), Some(2)),
+            RainOutlook::StartsAt(at(26, 2, 0))
+        );
+    }
+
+    #[test]
+    fn a_gap_in_the_hourly_series_is_unknown() {
+        let mut f = dry_sample();
+        f.hourly.remove(17);
+        assert_eq!(next_rain(&f, now(), Some(2)), RainOutlook::Unknown);
+    }
+
+    #[test]
+    fn the_rain_threshold_is_fifty_percent() {
+        let mut f = dry_sample();
+        set_hour(&mut f, 16, 0, Some(49.0));
+        assert_eq!(next_rain(&f, now(), Some(2)), RainOutlook::Dry);
+        set_hour(&mut f, 16, 0, Some(50.0));
+        assert_eq!(
+            next_rain(&f, now(), Some(2)),
+            RainOutlook::StartsAt(at(25, 16, 0))
+        );
+    }
+
+    #[test]
+    fn the_observation_decides_whether_it_is_raining_now() {
+        // Observed rain beats a dry current hour: rain until the next dry hour.
+        assert_eq!(
+            next_rain(&dry_sample(), now(), Some(61)),
+            RainOutlook::StopsAt(at(25, 15, 0))
+        );
+        // Observed clear beats a wet current hour: look for the next wet one.
+        let mut f = sample();
+        set_hour(&mut f, 14, 61, Some(90.0));
+        assert_eq!(
+            next_rain(&f, now(), Some(0)),
+            RainOutlook::StartsAt(at(25, 16, 0))
+        );
+    }
+
+    #[test]
+    fn without_an_observation_an_unknown_current_hour_is_unknown() {
+        let mut f = dry_sample();
+        set_hour(&mut f, 14, 0, None);
+        assert_eq!(next_rain(&f, now(), None), RainOutlook::Unknown);
+    }
+
+    #[test]
+    fn rain_through_the_whole_window_is_unknown() {
+        let mut f = sample();
+        for h in 14..=26 {
+            set_hour(&mut f, h, 61, Some(90.0));
+        }
+        assert_eq!(next_rain(&f, now(), None), RainOutlook::Unknown);
+    }
+
+    #[test]
+    fn rain_lines_use_the_hour() {
+        assert_eq!(
+            rain_line(RainOutlook::StartsAt(at(25, 16, 0))).unwrap(),
+            "Rain at 16:00"
+        );
+        assert_eq!(
+            rain_line(RainOutlook::StopsAt(at(25, 18, 0))).unwrap(),
+            "Rain until 18:00"
         );
     }
 

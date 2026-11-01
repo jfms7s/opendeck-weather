@@ -1,9 +1,12 @@
 //! **Weather**: current conditions at the configured location.
 //!
-//! - Key: temperature + condition. Press shows today's high/low and
-//!   "feels like"; it reverts on its own 15 s after the last press.
-//! - Dial: rotate to scroll the hourly forecast (up to 24h ahead), press or
-//!   tap the strip for the details screen.
+//! - Key: temperature + condition, or `Rain at` / `Rain until HH:MM` instead
+//!   of the condition when rain starts or stops within 12 hours. Press shows
+//!   today's high/low and "feels like"; it reverts on its own 15 s after the
+//!   last press.
+//! - Dial: temperature, condition and the rain line (`Dry next 12h` too) in
+//!   place of the location name. Rotate to scroll the hourly forecast (up to
+//!   24h ahead), press or tap the strip for the details screen.
 
 use super::Behavior;
 use crate::card::Card;

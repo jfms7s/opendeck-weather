@@ -35,6 +35,19 @@ impl Condition {
         }
     }
 
+    /// Rain, drizzle, snow, showers or thunderstorms: something is falling.
+    pub fn is_precipitation(self) -> bool {
+        matches!(
+            self,
+            Condition::Drizzle
+                | Condition::FreezingRain
+                | Condition::Rain
+                | Condition::Snow
+                | Condition::Showers
+                | Condition::Thunderstorm
+        )
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Condition::Clear => "Clear",
@@ -67,6 +80,21 @@ mod tests {
             assert_ne!(
                 Condition::from_code(code),
                 Condition::Unknown,
+                "code {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_falling_water_counts_as_precipitation() {
+        let wet = [51, 56, 61, 71, 80, 95];
+        let dry = [0, 1, 2, 3, 45, 4];
+        for code in wet {
+            assert!(Condition::from_code(code).is_precipitation(), "code {code}");
+        }
+        for code in dry {
+            assert!(
+                !Condition::from_code(code).is_precipitation(),
                 "code {code}"
             );
         }
