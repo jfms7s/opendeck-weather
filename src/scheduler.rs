@@ -4,15 +4,14 @@
 //! scrolled or toggled view `VIEW_TIMEOUT` after its last touch.
 //!
 //! It sleeps until the next of those deadlines instead of ticking, and
-//! parks entirely while no instance is visible. `Wake` gets it to look
-//! again when an instance appears or is touched (which can bring a
+//! parks entirely while no instance is visible. `Wake` (`wake.rs`) gets it
+//! to look again when an instance appears or is touched (which can bring a
 //! deadline forward), or when everything must be redrawn now.
 
 use crate::services::POLICY;
+use crate::wake::Wake;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::Notify;
 use tokio::time::Instant;
 
 /// How long a scrolled/toggled screen stays up after the last interaction.
@@ -25,32 +24,6 @@ pub const REFRESH_EVERY: Duration = Duration::from_secs(60);
 // After a failed fetch, the next refresh must be allowed to retry, or
 // recovery takes two refresh periods instead of one.
 const _: () = assert!(POLICY.retry_after.as_millis() < REFRESH_EVERY.as_millis());
-
-/// Shared doorbell between the trackers, the inspector and the scheduler.
-#[derive(Default)]
-pub struct Wake {
-    notify: Notify,
-    refresh_all: AtomicBool,
-}
-
-impl Wake {
-    /// Something changed that may move a deadline: look again.
-    pub fn poke(&self) {
-        // A stored permit, so a poke while the loop is busy isn't lost.
-        self.notify.notify_one();
-    }
-
-    /// Re-render every instance now (e.g. the default location changed).
-    pub fn refresh_all(&self) {
-        self.refresh_all.store(true, Ordering::SeqCst);
-        self.notify.notify_one();
-    }
-
-    #[cfg(test)]
-    pub fn take_refresh_all(&self) -> bool {
-        self.refresh_all.swap(false, Ordering::SeqCst)
-    }
-}
 
 /// What the scheduler needs from one action.
 pub trait Scheduled: Send + Sync {
@@ -76,8 +49,8 @@ pub async fn run(actions: Vec<Arc<dyn Scheduled>>, wake: Arc<Wake>) {
             // Nothing visible: no timers at all until something appears
             // (which renders itself, so the refresh clock starts afresh).
             refresh_at = None;
-            wake.refresh_all.store(false, Ordering::SeqCst);
-            wake.notify.notified().await;
+            wake.clear_refresh_all();
+            wake.rung().await;
             continue;
         }
         let due_refresh = *refresh_at.get_or_insert_with(|| Instant::now() + REFRESH_EVERY);
@@ -88,7 +61,7 @@ pub async fn run(actions: Vec<Arc<dyn Scheduled>>, wake: Arc<Wake>) {
 
         let forced = tokio::select! {
             () = tokio::time::sleep_until(deadline) => false,
-            () = wake.notify.notified() => wake.refresh_all.swap(false, Ordering::SeqCst),
+            () = wake.rung() => wake.take_refresh_all(),
         };
         let now = Instant::now();
         let refresh = forced || now >= due_refresh;
@@ -111,7 +84,7 @@ mod tests {
     use crate::model::Settings;
     use crate::tracker::Tracker;
     use std::sync::Mutex;
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     /// An action whose renders are just recorded.
     struct Fake {

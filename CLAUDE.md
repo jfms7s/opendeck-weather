@@ -26,8 +26,12 @@ reason = "…" }]` entry with the reason, never leave the job red.
 `services` (the one shared cache, default location) -> `views` (pure: data + view
 state + `now` -> `Card`) -> `card` (draws a `Card` on a key or a dial).
 `view_state` holds each action's UI state and its rules; `tracker` the live
-instances; `scheduler` the single refresh/revert loop; `actions/` the generic
-`CardAction<B>` host plus one small `Behavior` per action.
+instances; `scheduler` the single refresh/revert loop; `wake` the doorbell that
+gets it to look again; `actions/` the generic `CardAction<B>` host plus one small
+`Behavior` per action.
+
+Adding an action: see the checklist in the design note (vault,
+`personal/projects/opendeck-weather/design`).
 
 ## Invariants - don't break these
 
@@ -59,7 +63,8 @@ assert checks), serve stale data up to 3 h. Views revert 15 s after the last tou
 
 ## Releasing
 
-Tag `vX.Y.Z` -> the release workflow builds a **draft** release with the bundle,
+Tag `vX.Y.Z` -> the release workflow builds Linux x86_64/aarch64 on Ubuntu and the
+macOS arm64 binary on a `macos-15` runner, then creates a **draft** release with the bundle,
 `SHA256SUMS` and a provenance attestation; its notes start with the README smoke-test
 checklist, unticked, under an `UNVERIFIED` line (`scripts/release-body.mjs`, from the
 README's `smoke-checklist` markers - keep them). The draft's notes are the one place the

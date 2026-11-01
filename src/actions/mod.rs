@@ -8,9 +8,8 @@
 //! no handler here awaits the network: renders and searches are spawned,
 //! and a handler only updates in-memory state.
 //!
-//! Adding an action: a `Behavior` in its own module, a line in
-//! `register_all`, an entry in `assets/manifest.json`, and - if it has its
-//! own settings - a `data-action` field in the property inspector.
+//! Adding an action: see the checklist in the design note (vault,
+//! `personal/projects/opendeck-weather/design`).
 
 pub mod air_quality;
 pub mod forecast;
@@ -19,10 +18,11 @@ pub mod weather;
 use crate::card::{self, Card};
 use crate::model::{GlobalSettings, Location, Place, Settings};
 use crate::open_meteo::{FetchError, MAX_QUERY_CHARS};
-use crate::scheduler::{Scheduled, VIEW_TIMEOUT, Wake};
+use crate::scheduler::{Scheduled, VIEW_TIMEOUT};
 use crate::services::Services;
 use crate::tracker::{Frame, Tracker};
 use crate::views;
+use crate::wake::Wake;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use openaction::global_events::{DidReceiveGlobalSettingsEvent, GlobalEventHandler};
