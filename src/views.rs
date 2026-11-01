@@ -9,7 +9,7 @@
 
 use crate::card::Card;
 use crate::glyphs::Glyph;
-use crate::model::{AirQuality, AqiScale, Forecast, Hour, Units};
+use crate::model::{AirQuality, AqiScale, Current, Forecast, Hour, Units};
 use crate::palette;
 use crate::view_state::{AirQualityPage, ForecastView, WeatherView};
 use crate::wmo::Condition;
@@ -173,10 +173,13 @@ pub fn weather(
     stale: bool,
 ) -> Card {
     let hour_now = current_hour(f, now);
+    // A stale observation is hours old by now, so the forecast for the
+    // current hour is the better estimate of "now" (every screen agrees).
+    let observed = f.current.as_ref().filter(|_| !stale || hour_now.is_none());
 
     match view {
         WeatherView::Details => {
-            if let Some(card) = weather_details(f, units, now) {
+            if let Some(card) = weather_details(f, observed, hour_now.map(|(_, h)| h), units, now) {
                 return card.marked_stale(stale);
             }
         }
@@ -194,9 +197,7 @@ pub fn weather(
         WeatherView::Now => {}
     }
 
-    // Resting screen. A stale observation is hours old by now, so the
-    // forecast for the current hour is the better estimate of "now".
-    let observed = f.current.as_ref().filter(|_| !stale || hour_now.is_none());
+    // Resting screen.
     let (code, is_day, temperature) = match (observed, hour_now) {
         (Some(c), _) => (c.code, c.is_day, c.temperature),
         (None, Some((_, h))) => (h.code, h.is_day, h.temperature),
@@ -221,27 +222,43 @@ pub fn weather(
     card.marked_stale(stale)
 }
 
-/// High/low, feels-like, wind and humidity - needs the current conditions.
-fn weather_details(f: &Forecast, units: Units, now: NaiveDateTime) -> Option<Card> {
-    let c = f.current.as_ref()?;
+/// High/low, feels-like, wind and humidity. `observed` is the observation
+/// the resting screen would use (none when it is missing or stale); without
+/// it the screen falls back to the current hour, with the hour's condition
+/// for the label and `--` for wind and humidity. `None` only when there is
+/// neither, so the resting screen shows "No data".
+fn weather_details(
+    f: &Forecast,
+    observed: Option<&Current>,
+    hour_now: Option<&Hour>,
+    units: Units,
+    now: NaiveDateTime,
+) -> Option<Card> {
+    let (code, is_day, temperature) = match (observed, hour_now) {
+        (Some(c), _) => (c.code, c.is_day, c.temperature),
+        (None, Some(h)) => (h.code, h.is_day, h.temperature),
+        (None, None) => return None,
+    };
     // Today's range only when the forecast really has today; otherwise the
     // current temperature rather than another day's range.
     let value = f
         .daily
         .iter()
         .find(|d| d.date == now.date())
-        .map_or_else(|| temp(c.temperature), |d| high_low(d.max, d.min));
-    Some(Card::new(
-        weather_glyph(c.code, c.is_day),
-        value,
-        format!("Feels {}", temp(c.apparent_temperature)),
-        format!(
-            "Wind {} {} · Hum {}%",
-            whole(c.wind_speed),
-            units.wind_label(),
-            whole(c.humidity)
+        .map_or_else(|| temp(temperature), |d| high_low(d.max, d.min));
+    let (label, detail) = match observed {
+        Some(c) => (
+            format!("Feels {}", temp(c.apparent_temperature)),
+            format!(
+                "Wind {} {} · Hum {}%",
+                whole(c.wind_speed),
+                units.wind_label(),
+                whole(c.humidity)
+            ),
         ),
-    ))
+        None => (condition(code), "Wind -- · Hum --".to_string()),
+    };
+    Some(Card::new(weather_glyph(code, is_day), value, label, detail))
 }
 
 /// The day `base_day` days after today, stepped `view.days` further and
@@ -655,6 +672,42 @@ pub(crate) mod tests {
         let c = lisbon(&f, WeatherView::Details, now());
         assert_eq!(c.value, "22°");
         assert_eq!(c.detail, "Wind 12 km/h · Hum 46%");
+    }
+
+    #[test]
+    fn weather_details_without_current_conditions_still_differ_from_now() {
+        let mut f = sample();
+        f.current = None;
+        let details = lisbon(&f, WeatherView::Details, now());
+        assert_eq!(details.value, "28°/18°");
+        assert_eq!(details.label, "Clear", "the current hour's condition");
+        assert_eq!(details.detail, "Wind -- · Hum --");
+        assert_ne!(details, lisbon(&f, WeatherView::Now, now()));
+    }
+
+    #[test]
+    fn stale_weather_details_ignore_the_old_observation() {
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Details,
+            now(),
+            true,
+        );
+        assert_eq!(c.value, "28°/18°");
+        assert_eq!(c.label, "Clear", "not the old observation's feels-like");
+        assert_eq!(c.detail, "Wind -- · Hum --");
+        assert!(c.stale);
+    }
+
+    #[test]
+    fn weather_details_without_today_or_current_use_the_current_hour() {
+        let mut f = sample_days(26, 3);
+        f.current = None;
+        let c = lisbon(&f, WeatherView::Details, now());
+        assert_eq!(c.value, "14°");
+        assert_eq!(c.label, "Clear");
     }
 
     #[test]
