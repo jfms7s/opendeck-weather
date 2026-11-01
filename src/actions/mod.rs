@@ -145,16 +145,51 @@ impl<B: Behavior> CardAction<B> {
         });
     }
 
+    // The event handlers' bodies. Plain `fn`s on plain data, not `async`:
+    // awaiting the network in one is a compile error (CLAUDE.md "Handlers
+    // never await the network"), and tests can call them without an
+    // `openaction::Instance`, which only openaction can build.
+
+    /// The instance appeared, or its settings changed: track the new
+    /// settings and redraw it.
+    fn on_settings(&self, id: &str, settings: &Settings) {
+        self.tracker.track(id, settings.clone());
+        self.spawn_render(id.to_string());
+    }
+
+    fn on_disappear(&self, id: &str) {
+        self.tracker.untrack(id);
+    }
+
     /// Applies an interaction to one instance's view, then re-renders it.
-    fn interact(&self, instance: &Instance, f: impl FnOnce(B::View) -> B::View) {
-        if self.tracker.interact(&instance.instance_id, f) {
-            self.spawn_render(instance.instance_id.clone());
+    fn on_interaction(&self, id: &str, f: impl FnOnce(B::View) -> B::View) {
+        if self.tracker.interact(id, f) {
+            self.spawn_render(id.to_string());
         }
     }
 
-    fn appear(&self, instance: &Instance, settings: &Settings) {
-        self.tracker.track(&instance.instance_id, settings.clone());
-        self.spawn_render(instance.instance_id.clone());
+    /// Answers the property inspector in the background: a search waits on
+    /// the network.
+    fn on_inspector_message(&self, id: String, payload: &Value) {
+        let Ok(message) = serde_json::from_value::<InspectorMessage>(payload.clone()) else {
+            // The event name only: the payload could be anything, any size.
+            let event: String = (payload.get("event").and_then(Value::as_str))
+                .unwrap_or("?")
+                .chars()
+                .take(40)
+                .collect();
+            log::warn!("ignoring unknown property inspector message {event:?}");
+            return;
+        };
+        let (services, wake) = (self.services.clone(), self.wake.clone());
+        tokio::spawn(async move {
+            let reply = answer(&services, &wake, message).await;
+            if let Some(instance) = openaction::get_instance(id).await
+                && let Err(e) = instance.send_to_property_inspector(reply).await
+            {
+                log::warn!("reply to property inspector failed: {e}");
+            }
+        });
     }
 }
 
@@ -180,13 +215,14 @@ impl<B: Behavior> Scheduled for CardAction<B> {
     }
 }
 
+/// Each handler is one call into the plain-`fn` bodies above.
 #[async_trait]
 impl<B: Behavior> Action for CardAction<B> {
     const UUID: &'static str = B::UUID;
     type Settings = Settings;
 
     async fn will_appear(&self, instance: &Instance, settings: &Settings) -> OpenActionResult<()> {
-        self.appear(instance, settings);
+        self.on_settings(&instance.instance_id, settings);
         Ok(())
     }
 
@@ -195,17 +231,17 @@ impl<B: Behavior> Action for CardAction<B> {
         instance: &Instance,
         settings: &Settings,
     ) -> OpenActionResult<()> {
-        self.appear(instance, settings);
+        self.on_settings(&instance.instance_id, settings);
         Ok(())
     }
 
     async fn will_disappear(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        self.tracker.untrack(&instance.instance_id);
+        self.on_disappear(&instance.instance_id);
         Ok(())
     }
 
     async fn key_up(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        self.interact(instance, B::key_press);
+        self.on_interaction(&instance.instance_id, B::key_press);
         Ok(())
     }
 
@@ -216,12 +252,12 @@ impl<B: Behavior> Action for CardAction<B> {
         ticks: i16,
         _pressed: bool,
     ) -> OpenActionResult<()> {
-        self.interact(instance, |v| B::dial_rotate(v, ticks));
+        self.on_interaction(&instance.instance_id, |v| B::dial_rotate(v, ticks));
         Ok(())
     }
 
     async fn dial_up(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        self.interact(instance, B::dial_press);
+        self.on_interaction(&instance.instance_id, B::dial_press);
         Ok(())
     }
 
@@ -232,7 +268,7 @@ impl<B: Behavior> Action for CardAction<B> {
         _position: (u16, u16),
         _hold: bool,
     ) -> OpenActionResult<()> {
-        self.interact(instance, B::dial_press);
+        self.on_interaction(&instance.instance_id, B::dial_press);
         Ok(())
     }
 
@@ -242,26 +278,7 @@ impl<B: Behavior> Action for CardAction<B> {
         _: &Settings,
         payload: &Value,
     ) -> OpenActionResult<()> {
-        let Ok(message) = serde_json::from_value::<InspectorMessage>(payload.clone()) else {
-            // The event name only: the payload could be anything, any size.
-            let event: String = (payload.get("event").and_then(Value::as_str))
-                .unwrap_or("?")
-                .chars()
-                .take(40)
-                .collect();
-            log::warn!("ignoring unknown property inspector message {event:?}");
-            return Ok(());
-        };
-        let (services, wake) = (self.services.clone(), self.wake.clone());
-        let id = instance.instance_id.clone();
-        tokio::spawn(async move {
-            let reply = answer(&services, &wake, message).await;
-            if let Some(instance) = openaction::get_instance(id).await
-                && let Err(e) = instance.send_to_property_inspector(reply).await
-            {
-                log::warn!("reply to property inspector failed: {e}");
-            }
-        });
+        self.on_inspector_message(instance.instance_id.clone(), payload);
         Ok(())
     }
 }
@@ -390,6 +407,16 @@ pub struct GlobalSettingsHandler {
     pub wake: Arc<Wake>,
 }
 
+impl GlobalSettingsHandler {
+    /// The stored global settings arrived. Plain `fn`, like the action
+    /// handlers' bodies. They are the source of truth: unreadable ones mean
+    /// no default, the same as `null`.
+    fn on_global_settings(&self, settings: Value) {
+        let global: GlobalSettings = serde_json::from_value(settings).unwrap_or_default();
+        apply_default_location(&self.services, &self.wake, global.default_location);
+    }
+}
+
 #[async_trait]
 impl GlobalEventHandler for GlobalSettingsHandler {
     async fn plugin_ready(&self) -> OpenActionResult<()> {
@@ -400,9 +427,7 @@ impl GlobalEventHandler for GlobalSettingsHandler {
         &self,
         event: DidReceiveGlobalSettingsEvent,
     ) -> OpenActionResult<()> {
-        let global: GlobalSettings =
-            serde_json::from_value(event.payload.settings).unwrap_or_default();
-        apply_default_location(&self.services, &self.wake, global.default_location);
+        self.on_global_settings(event.payload.settings);
         Ok(())
     }
 }
@@ -415,6 +440,7 @@ mod tests {
     use crate::open_meteo::FORECAST_DAYS;
     use serde_json::json;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::Notify;
 
     const ALL_UUIDS: [&str; 3] = [
@@ -594,6 +620,8 @@ mod tests {
     struct FakeSurface {
         controller: &'static str,
         sent: Mutex<Vec<(&'static str, String)>>,
+        /// The next `set_image` fails (and records nothing).
+        fail_next_image: AtomicBool,
     }
 
     impl FakeSurface {
@@ -601,6 +629,7 @@ mod tests {
             FakeSurface {
                 controller,
                 sent: Mutex::default(),
+                fail_next_image: AtomicBool::new(false),
             }
         }
 
@@ -619,6 +648,10 @@ mod tests {
             Ok(())
         }
         async fn set_image(&self, image: String) -> OpenActionResult<()> {
+            if self.fail_next_image.swap(false, Ordering::SeqCst) {
+                let broken = serde_json::from_str::<Value>("{").unwrap_err();
+                return Err(openaction::OpenActionError::Serde(broken));
+            }
             self.sent.lock().unwrap().push(("image", image));
             Ok(())
         }
@@ -764,5 +797,116 @@ mod tests {
             .map(|(_, image)| image)
             .collect();
         assert_eq!(images, [card::key_image(&echo_card(7))]);
+    }
+
+    fn lisbon() -> Location {
+        located().location.unwrap()
+    }
+
+    fn porto() -> Location {
+        Location {
+            name: "Porto".into(),
+            latitude: 41.1,
+            longitude: -8.6,
+            label: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn new_settings_replace_the_tracked_ones() {
+        let action = echo();
+        action.on_settings("k", &located());
+        let moved = Settings {
+            location: Some(porto()),
+            ..Settings::default()
+        };
+        action.on_settings("k", &moved);
+        assert_eq!(action.tracker.snapshot("k").unwrap().settings, moved);
+    }
+
+    #[tokio::test]
+    async fn a_disappeared_instance_is_forgotten() {
+        let action = echo();
+        action.on_settings("k", &located());
+        assert!(action.has_instances());
+        action.on_disappear("k");
+        assert!(action.tracker.snapshot("k").is_none());
+        assert!(!action.has_instances(), "the scheduler can park");
+    }
+
+    #[tokio::test]
+    async fn an_interaction_changes_only_a_tracked_instance() {
+        let action = echo();
+        action.on_settings("k", &located());
+        action.on_interaction("k", Echo::key_press);
+        assert_eq!(action.tracker.snapshot("k").unwrap().view, 1);
+        action.on_interaction("gone", Echo::key_press);
+        assert!(action.tracker.snapshot("gone").is_none());
+    }
+
+    #[tokio::test]
+    async fn inspector_messages_return_without_waiting_for_an_answer() {
+        // A search would go to the network; the handler only spawns it.
+        let action = echo();
+        action.on_inspector_message("k".into(), &json!({"event": "search", "query": "Porto"}));
+        action.on_inspector_message("k".into(), &json!({"event": "nonsense"}));
+        action.on_inspector_message("k".into(), &json!(42));
+    }
+
+    fn global_settings() -> GlobalSettingsHandler {
+        GlobalSettingsHandler {
+            services: Arc::default(),
+            wake: Arc::default(),
+        }
+    }
+
+    #[test]
+    fn the_saved_default_location_is_loaded_and_redraws_everything() {
+        let handler = global_settings();
+        // The wire shape OpenDeck sends, through openaction's own type.
+        let event: DidReceiveGlobalSettingsEvent = serde_json::from_value(json!({
+            "payload": {"settings": {"default_location": {
+                "name": "Lisbon", "latitude": 38.7, "longitude": -9.1
+            }}}
+        }))
+        .unwrap();
+        handler.on_global_settings(event.payload.settings);
+        assert_eq!(handler.services.default_location(), Some(lisbon()));
+        assert!(handler.wake.take_refresh_all());
+    }
+
+    #[test]
+    fn unreadable_global_settings_mean_no_default_and_never_panic() {
+        let handler = global_settings();
+        for garbage in [
+            json!(null),
+            json!("x"),
+            json!([1]),
+            json!({"default_location": 7}),
+        ] {
+            handler.on_global_settings(garbage);
+            assert_eq!(handler.services.default_location(), None);
+            assert!(!handler.wake.take_refresh_all(), "nothing changed");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_frame_that_failed_to_send_is_sent_again() {
+        let action = echo();
+        let key = FakeSurface::new("Keypad");
+        action.tracker.track("k", located());
+        key.fail_next_image.store(true, Ordering::SeqCst);
+        action.render_on("k", &key).await;
+        assert_eq!(key.take(), [("title", String::new())], "the image failed");
+
+        action.render_on("k", &key).await;
+        assert_eq!(
+            key.take(),
+            [
+                ("title", String::new()),
+                ("image", card::key_image(&echo_card(0)))
+            ],
+            "the same card again, in full"
+        );
     }
 }
