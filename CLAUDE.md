@@ -15,7 +15,10 @@ cargo build --release --locked && node build.mjs    # bundle in dist/
 ```
 
 CI runs all of these, plus an aarch64 `cargo check`, an MSRV (`rust-version`) check
-and `cargo deny check advisories`. Always pass `--locked`.
+and `cargo deny check advisories`. Always pass `--locked`. The release workflow runs
+the same advisory scan before it builds, so `advisories` must stay green: to accept an
+advisory on purpose, add a `deny.toml` `[advisories] ignore = [{ id = "RUSTSEC-…",
+reason = "…" }]` entry with the reason, never leave the job red.
 
 ## Layout
 

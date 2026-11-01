@@ -1,9 +1,10 @@
 name: Release
 # Push a vX.Y.Z tag matching Cargo.toml and assets/manifest.json. This
-# builds and tests the tagged commit (Linux binaries on Ubuntu, the macOS
-# one on a macOS runner), then creates a *draft* release with the bundle,
-# SHA256SUMS and a build-provenance attestation attached, so a release is
-# never visible without its asset. The draft's notes start with the README's
+# scans Cargo.lock for RustSec advisories (cargo-deny, as in CI), builds and
+# tests the tagged commit (Linux binaries on Ubuntu, the macOS one on a macOS
+# runner), then creates a *draft* release with the bundle, SHA256SUMS and a
+# build-provenance attestation attached, so a release is never visible
+# without its asset. The draft's notes start with the README's
 # smoke-test checklist, unticked, under an UNVERIFIED line
 # (scripts/release-body.mjs). Run that checklist on Linux and a Mac, record it
 # in the notes, then publish with scripts/publish-release.sh (see "Releasing").
@@ -74,6 +75,14 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME, Cargo.toml $crate, manifest.json $manifest must all match"
             exit 1
           fi
+      # The same scan as CI's advisories job: a tag never drafts a release
+      # while a RustSec advisory is open against Cargo.lock. Accept one on
+      # purpose with a deny.toml [advisories] ignore entry and a reason.
+      - name: Check for RustSec advisories
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          arguments: --all-features --locked
+          command: check advisories
       # dtolnay/rust-toolchain has no release tags: pinned to a master commit.
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-10-01
         with:
