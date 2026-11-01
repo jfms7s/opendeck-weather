@@ -358,7 +358,7 @@ enum PluginMessage {
 async fn answer(services: &Services, wake: &Wake, message: InspectorMessage) -> PluginMessage {
     match message {
         InspectorMessage::Search { query } => {
-            let (results, error) = if query.chars().count() > MAX_QUERY_CHARS {
+            let (results, error) = if query_too_long(&query) {
                 (
                     None,
                     Some(format!("search text over {MAX_QUERY_CHARS} characters")),
@@ -392,6 +392,12 @@ async fn answer(services: &Services, wake: &Wake, message: InspectorMessage) -> 
             PluginMessage::DefaultLocation { location }
         }
     }
+}
+
+/// Longer than the geocoder is asked for (counted in characters, as the
+/// inspector's `maxlength` counts them).
+fn query_too_long(query: &str) -> bool {
+    query.chars().count() > MAX_QUERY_CHARS
 }
 
 fn apply_default_location(services: &Services, wake: &Wake, location: Option<Location>) {
@@ -514,6 +520,16 @@ mod tests {
     }
 
     #[test]
+    fn a_query_as_long_as_the_inspector_allows_is_accepted() {
+        assert!(!query_too_long(&"x".repeat(MAX_QUERY_CHARS)));
+        assert!(query_too_long(&"x".repeat(MAX_QUERY_CHARS + 1)));
+        assert!(
+            !query_too_long(&"ã".repeat(MAX_QUERY_CHARS)),
+            "characters, not bytes"
+        );
+    }
+
+    #[test]
     fn a_new_default_location_is_stored_and_redraws_everything() {
         let services = Services::default();
         let wake = Wake::default();
@@ -571,7 +587,10 @@ mod tests {
         // Its fallbacks for unset fields are the plugin's defaults.
         let d = Settings::default();
         let name = |v: &dyn erased::Named| v.wire_name();
-        assert!(html.contains(&format!("s.day ?? {}", d.day)), "day default");
+        assert!(
+            html.contains(&format!("String(s.day ?? {})", d.day)),
+            "day default"
+        );
         assert!(
             html.contains(&format!("s.units || \"{}\"", name(&d.units))),
             "units default"

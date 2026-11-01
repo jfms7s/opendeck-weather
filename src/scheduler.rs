@@ -25,6 +25,8 @@ pub const REFRESH_EVERY: Duration = Duration::from_secs(60);
 // After a failed fetch, the next refresh must be allowed to retry, or
 // recovery takes two refresh periods instead of one.
 const _: () = assert!(POLICY.retry_after.as_millis() < REFRESH_EVERY.as_millis());
+// Below this, a dead network turns refreshes into a request storm.
+const _: () = assert!(POLICY.retry_after.as_secs() >= 30);
 
 /// Shared doorbell between the trackers, the inspector and the scheduler.
 #[derive(Default)]
@@ -264,6 +266,16 @@ mod tests {
         assert_eq!(next_deadline(later, None), later);
         assert_eq!(next_deadline(later, Some(now)), now);
         assert_eq!(next_deadline(now, Some(later)), now);
+    }
+
+    #[test]
+    fn the_readme_cache_numbers_hold() {
+        // README "How it fetches data": "re-fetched at most every 10 minutes"
+        assert_eq!(POLICY.ttl, Duration::from_secs(10 * 60));
+        // "tries again at the next minute's refresh" (so below REFRESH_EVERY)
+        assert_eq!(POLICY.retry_after, Duration::from_secs(55));
+        // "the last good data stays on screen for up to 3 hours"
+        assert_eq!(POLICY.stale_after, Duration::from_secs(3 * 60 * 60));
     }
 
     #[test]
