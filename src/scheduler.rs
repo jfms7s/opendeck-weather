@@ -234,6 +234,29 @@ mod tests {
         assert_eq!(fake.take_rendered(), ["a"]);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn after_parking_the_refresh_clock_starts_afresh() {
+        let wake = Arc::new(Wake::default());
+        let fake = Fake::new(&wake);
+        start(&fake, &wake);
+        fake.tracker.track("a", Settings::default());
+        settle().await;
+        advance(10).await;
+        fake.tracker.untrack("a");
+        advance(50).await; // the old clock's refresh at 60 s; then it parks
+        advance(40).await;
+        fake.take_rendered();
+        fake.tracker.track("b", Settings::default());
+        settle().await;
+        advance(59).await;
+        assert!(
+            fake.take_rendered().is_empty(),
+            "a refresh {REFRESH_EVERY:?} after appearing, not the old clock's"
+        );
+        advance(1).await;
+        assert_eq!(fake.take_rendered(), ["b"]);
+    }
+
     #[test]
     fn the_deadline_is_the_earlier_of_refresh_and_revert() {
         let now = Instant::now();
