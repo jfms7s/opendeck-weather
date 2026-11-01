@@ -26,9 +26,11 @@ hour, or rain all 12 hours), the card shows the location name and condition as b
   12 hours, so a dry day still shows the sky. Press for today's high/low and the "feels
   like" temperature.
 - **Dial** - the rain line replaces the location name under the condition. Rotate to
-  scroll the hourly forecast up to 24 hours ahead (time, temperature, chance of rain).
-  Press the dial or tap the strip for the details screen: high/low, feels-like, wind
-  and humidity.
+  scroll the hourly forecast up to 24 hours ahead (time, temperature, chance of rain);
+  press and turn to scroll the days instead, up to 6 days ahead (the same card a
+  Forecast dial shows for that day). Press the dial or tap the strip for the details
+  screen: high/low, feels-like, wind and humidity. Releasing the dial after a press and
+  turn doesn't open the details.
 
 ### Forecast
 
@@ -51,6 +53,10 @@ AQI** scale (your choice).
 
 Any scrolled, paged or details screen returns to its resting screen 15 seconds after
 your last press or turn.
+
+On a dial, **hold the touch strip** to fetch fresh data now instead of waiting for the
+10-minute refresh. After a failed request it still waits the usual minute before trying
+again, so holding it during an outage doesn't flood Open-Meteo.
 
 ## Settings
 
@@ -137,6 +143,12 @@ repository), which the release notes link.
 - [ ] On a dial, rotating Weather clockwise steps through the hours (the label shows the
       hour, e.g. `16:00`). It stops at +24h, and rotating back stops at "now". Pressing
       shows the details screen.
+- [ ] On a dial, pressing and turning Weather steps through the days (tomorrow's
+      high/low, as on a Forecast dial), stops at 6 days ahead, and back at "now";
+      releasing the dial afterwards does not open the details screen.
+- [ ] Holding the touch strip on a dial keeps its screen and the dial stays responsive.
+      With the network off, holding it again and again over a minute logs at most one
+      or two "refresh failed" warnings, not one per hold.
 - [ ] A Forecast key set to "Tomorrow" shows "Tomorrow" with its chance of rain (e.g.
       `Tomorrow · 70%`) under the high/low. Pressing it steps to the next dates and
       wraps back to Today after the last day.

@@ -18,16 +18,16 @@
 			"UUID": "com.jfms7s.weather.current",
 			"Name": "Weather",
 			"Icon": "icons/weather",
-			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like; on a dial, rotate to scroll the hourly forecast",
+			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like; on a dial, rotate to scroll the hourly forecast, press and rotate for the days, hold the strip to refresh",
 			"Controllers": ["Keypad", "Encoder"],
 			"PropertyInspectorPath": "propertyInspector/index.html",
 			"States": [{ "Image": "icons/weather" }],
 			"Encoder": {
 				"layout": "layouts/card.json",
 				"TriggerDescription": {
-					"Rotate": "Scroll hourly forecast",
+					"Rotate": "Scroll hours (press and turn: days)",
 					"Push": "Details",
-					"Touch": "Details"
+					"Touch": "Details (hold: refresh now)"
 				}
 			}
 		},
@@ -44,7 +44,7 @@
 				"TriggerDescription": {
 					"Rotate": "Scroll days",
 					"Push": "Sunrise / sunset",
-					"Touch": "Sunrise / sunset"
+					"Touch": "Sunrise / sunset (hold: refresh now)"
 				}
 			}
 		},
@@ -61,7 +61,7 @@
 				"TriggerDescription": {
 					"Rotate": "Page pollutants",
 					"Push": "Back to index",
-					"Touch": "Back to index"
+					"Touch": "Back to index (hold: refresh now)"
 				}
 			}
 		}
