@@ -38,6 +38,10 @@ jobs:
         with:
           node-version: 24
       - run: node build.mjs
+      # The Release workflow builds the draft's notes this way; a README edit
+      # that breaks the smoke-checklist markers fails here, not on the tag.
+      - name: Draft release notes build from the README checklist
+        run: node scripts/release-body.mjs > /dev/null
       # Only reached when every step above passed, so a red test leaves no fragment.
       - name: Collect coverage fragment (eng-metrics-lab)
         run: |
