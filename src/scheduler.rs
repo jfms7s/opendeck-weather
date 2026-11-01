@@ -243,7 +243,8 @@ mod tests {
         settle().await;
         advance(10).await;
         fake.tracker.untrack("a");
-        advance(90).await; // the old refresh passes; it parks
+        advance(50).await; // the old clock's refresh at 60 s; then it parks
+        advance(40).await;
         fake.take_rendered();
         fake.tracker.track("b", Settings::default());
         settle().await;
