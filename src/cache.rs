@@ -13,6 +13,9 @@
 //!   render into a request storm.
 //! - Every value comes back as `Cached`, which says whether it is past its
 //!   TTL (a fallback after a failed refresh), so the card can say so.
+//! - `refresh` fetches even when the value is fresh (a "refresh now"
+//!   gesture), but keeps everything else: the backoff, the stale fallback,
+//!   and not waiting behind an in-flight fetch.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -32,6 +35,9 @@ pub struct CachePolicy {
 struct Slot<V, E> {
     value: Option<(Instant, Arc<V>)>,
     last_error: Option<(Instant, E)>,
+    /// Finished fetch attempts, so a refresh that waited on another
+    /// caller's fetch can tell it already has a newer answer.
+    attempts: u64,
 }
 
 /// One key's state and its fetch guard. `state` is a std mutex, only ever
@@ -80,6 +86,7 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
                     state: Mutex::new(Slot {
                         value: None,
                         last_error: None,
+                        attempts: 0,
                     }),
                     fetching: AsyncMutex::new(()),
                 })
@@ -98,10 +105,17 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
             })
     }
 
-    /// The answer when no fetch is due: the value is fresh, or the key is
-    /// backing off after a failure. `None` means it's time to fetch.
-    fn settled(&self, slot: &Slot<V, E>, now: Instant) -> Option<Result<Cached<V>, E>> {
-        if let Some((at, v)) = &slot.value
+    /// The answer when no fetch is due: the value is fresh (unless
+    /// `refreshing`), or the key is backing off after a failure. `None`
+    /// means it's time to fetch.
+    fn settled(
+        &self,
+        slot: &Slot<V, E>,
+        now: Instant,
+        refreshing: bool,
+    ) -> Option<Result<Cached<V>, E>> {
+        if !refreshing
+            && let Some((at, v)) = &slot.value
             && now.duration_since(*at) < self.policy.ttl
         {
             return Some(Ok(Cached {
@@ -122,15 +136,39 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<V, E>>,
     {
+        self.fetch_unless_settled(key, fetch, false).await
+    }
+
+    /// Like `get`, but fetches even while the value is fresh. Still backs
+    /// off after a failure, and still answers with the previous value when
+    /// the fetch fails or another caller's fetch is in flight.
+    pub async fn refresh<F, Fut>(&self, key: &K, fetch: F) -> Result<Cached<V>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<V, E>>,
+    {
+        self.fetch_unless_settled(key, fetch, true).await
+    }
+
+    async fn fetch_unless_settled<F, Fut>(
+        &self,
+        key: &K,
+        fetch: F,
+        refreshing: bool,
+    ) -> Result<Cached<V>, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<V, E>>,
+    {
         let cell = self.slot(key);
 
-        let guard = {
+        let (guard, attempts_seen) = {
             let state = cell.state();
             let now = Instant::now();
-            if let Some(answer) = self.settled(&state, now) {
+            if let Some(answer) = self.settled(&state, now, refreshing) {
                 return answer;
             }
-            match cell.fetching.try_lock() {
+            let guard = match cell.fetching.try_lock() {
                 Ok(guard) => Some(guard),
                 Err(_) => {
                     // Someone else is fetching. Don't wait for them if there
@@ -142,18 +180,21 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
                     }
                     None
                 }
-            }
+            };
+            (guard, state.attempts)
         };
         let _guard = match guard {
             Some(guard) => guard,
             None => cell.fetching.lock().await,
         };
 
-        // Another caller may have just finished a fetch while we waited.
+        // Another caller may have just finished a fetch while we waited;
+        // its answer is new enough for a refresh too.
         let started = {
             let state = cell.state();
             let now = Instant::now();
-            if let Some(answer) = self.settled(&state, now) {
+            let still_refreshing = refreshing && state.attempts == attempts_seen;
+            if let Some(answer) = self.settled(&state, now, still_refreshing) {
                 return answer;
             }
             now
@@ -163,6 +204,7 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         // its timeout must not push the next retry past the next refresh.
         let result = fetch().await;
         let mut state = cell.state();
+        state.attempts += 1;
         match result {
             Ok(v) => {
                 let v = Arc::new(v);
@@ -232,6 +274,86 @@ mod tests {
         tokio::time::advance(Duration::from_secs(601)).await;
         assert_eq!(get(&cache, &calls, Ok(2)).await, Ok(2));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    async fn refresh(
+        cache: &TestCache,
+        calls: &AtomicU32,
+        result: Result<u32, String>,
+    ) -> Result<u32, String> {
+        cache
+            .refresh(&"k", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                result
+            })
+            .await
+            .map(|c| *c.value)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn refresh_fetches_even_inside_the_ttl() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert_eq!(refresh(&cache, &calls, Ok(2)).await, Ok(2));
+        assert_eq!(
+            get(&cache, &calls, Ok(3)).await,
+            Ok(2),
+            "the new value is cached"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn refresh_keeps_the_backoff_after_a_failure() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        assert_eq!(get(&cache, &calls, Err("down".into())).await, Ok(1));
+        tokio::time::advance(Duration::from_secs(30)).await;
+        let stale = cache.refresh(&"k", || async { Ok(9) }).await.unwrap();
+        assert_eq!((*stale.value, stale.stale), (1, true));
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "no fetch while backing off"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_refresh_keeps_serving_the_previous_value() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        assert_eq!(refresh(&cache, &calls, Err("down".into())).await, Ok(1));
+        assert_eq!(get(&cache, &calls, Ok(2)).await, Ok(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refresh_that_waited_on_a_fetch_uses_its_result() {
+        let cache = Arc::new(TestCache::new(POLICY));
+        let calls = Arc::new(AtomicU32::new(0));
+        let slow = {
+            let (cache, calls) = (cache.clone(), calls.clone());
+            tokio::spawn(async move {
+                cache
+                    .get(&"k", || async {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        Ok(1)
+                    })
+                    .await
+                    .map(|c| *c.value)
+            })
+        };
+        tokio::task::yield_now().await;
+        // Nothing to show yet, so the refresh waits on the get's fetch.
+        assert_eq!(refresh(&cache, &calls, Ok(2)).await, Ok(1));
+        assert_eq!(slow.await.unwrap(), Ok(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one request, not two");
     }
 
     #[tokio::test(start_paused = true)]

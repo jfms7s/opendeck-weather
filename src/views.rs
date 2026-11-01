@@ -194,6 +194,19 @@ pub fn weather(
                 .marked_stale(stale);
             }
         }
+        WeatherView::Day(ahead) => {
+            // Only a day the forecast still covers: `forecast` would wrap a
+            // short one (an outage across midnight) back to today.
+            let covered =
+                today_index(f, now).is_some_and(|t| f.daily.len() - t > usize::from(ahead));
+            let days = ForecastView {
+                days: i32::from(ahead),
+                sun: false,
+            };
+            if covered && let Some(card) = forecast(f, 0, days, now, stale) {
+                return card;
+            }
+        }
         WeatherView::Now => {}
     }
 
@@ -708,6 +721,31 @@ pub(crate) mod tests {
         let c = lisbon(&f, WeatherView::Details, now());
         assert_eq!(c.value, "14°");
         assert_eq!(c.label, "Clear");
+    }
+
+    #[test]
+    fn a_weather_day_view_shows_that_forecast_day() {
+        let f = sample();
+        let c = lisbon(&f, WeatherView::Day(1), now());
+        let expected = day(&f, 0, 1);
+        assert_eq!(c, expected, "what a Forecast dial shows for tomorrow");
+        assert_eq!(c.value, "29°/18°");
+        let stale = weather(
+            &f,
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Day(1),
+            now(),
+            true,
+        );
+        assert!(stale.stale);
+    }
+
+    #[test]
+    fn a_weather_day_past_the_forecast_falls_back_to_now_instead_of_wrapping() {
+        let f = sample(); // three days from today
+        let c = lisbon(&f, WeatherView::Day(3), now());
+        assert_eq!(c, lisbon(&f, WeatherView::Now, now()));
     }
 
     #[test]

@@ -3,19 +3,39 @@
 //! the actions apply these on input and `views` reads them; the tracker
 //! stores them without knowing what they mean.
 
-/// Weather: the resting screen, an hour ahead, or the details screen.
+/// Weather: the resting screen, an hour or a day ahead, or the details
+/// screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeatherView {
     #[default]
     Now,
     /// Hours ahead of the current one, `1..=MAX_HOURS_AHEAD`.
     Hour(u8),
+    /// Days after today, `1..=MAX_DAYS_AHEAD` (a dial turned while pressed).
+    Day(u8),
     Details,
 }
 
 impl WeatherView {
     /// How far ahead a Weather dial can scroll.
     pub const MAX_HOURS_AHEAD: u8 = 24;
+    /// The last forecast day a pressed turn reaches (today + 6 of 7 days).
+    pub const MAX_DAYS_AHEAD: u8 = crate::open_meteo::FORECAST_DAYS - 1;
+
+    /// Scrolls the daily forecast, clamped between today (the resting
+    /// screen) and the last forecast day; starts from today on any other
+    /// screen.
+    pub fn scroll_days(self, ticks: i16) -> Self {
+        let from = match self {
+            WeatherView::Day(d) => i32::from(d),
+            _ => 0,
+        };
+        let to = (from + i32::from(ticks)).clamp(0, i32::from(Self::MAX_DAYS_AHEAD));
+        match u8::try_from(to) {
+            Ok(0) | Err(_) => WeatherView::Now,
+            Ok(d) => WeatherView::Day(d),
+        }
+    }
 
     /// Scrolls the hourly forecast, clamped between now and the horizon;
     /// leaves the details screen.
@@ -108,6 +128,24 @@ mod tests {
             WeatherView::Hour(WeatherView::MAX_HOURS_AHEAD)
         );
         assert_eq!(WeatherView::Details.scroll(1), WeatherView::Hour(1));
+    }
+
+    #[test]
+    fn weather_day_scrolling_clamps_between_today_and_the_last_day() {
+        assert_eq!(WeatherView::Now.scroll_days(-1), WeatherView::Now);
+        assert_eq!(WeatherView::Now.scroll_days(1), WeatherView::Day(1));
+        assert_eq!(WeatherView::Hour(5).scroll_days(2), WeatherView::Day(2));
+        assert_eq!(WeatherView::Day(2).scroll_days(-2), WeatherView::Now);
+        assert_eq!(
+            WeatherView::Day(3).scroll_days(100),
+            WeatherView::Day(WeatherView::MAX_DAYS_AHEAD)
+        );
+        assert_eq!(WeatherView::MAX_DAYS_AHEAD, 6);
+        assert_eq!(
+            WeatherView::Day(3).scroll(1),
+            WeatherView::Hour(1),
+            "unpressed: hours"
+        );
     }
 
     #[test]

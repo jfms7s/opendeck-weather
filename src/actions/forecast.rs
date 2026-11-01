@@ -5,7 +5,7 @@
 //!   rain. Press to step to the next day; it returns to the configured day
 //!   on its own.
 //! - Dial: rotate to scroll through the days, press or tap the strip for
-//!   sunrise/sunset.
+//!   sunrise/sunset, hold the strip to refresh now.
 
 use super::Behavior;
 use crate::card::Card;
@@ -34,6 +34,17 @@ impl Behavior for Forecast {
 
     fn dial_press(view: ForecastView) -> ForecastView {
         view.toggle_sun()
+    }
+
+    async fn refresh(
+        services: &Services,
+        location: &Location,
+        settings: &Settings,
+    ) -> Result<(), FetchError> {
+        services
+            .refresh_forecast(location, settings.units)
+            .await
+            .map(drop)
     }
 
     async fn card(

@@ -67,6 +67,30 @@ impl Services {
             .await
     }
 
+    /// Fetches the forecast now even if the cached one is fresh (still
+    /// backing off after a failure).
+    pub async fn refresh_forecast(
+        &self,
+        location: &Location,
+        units: Units,
+    ) -> Result<Cached<Forecast>, FetchError> {
+        self.forecasts
+            .refresh(&(place_key(location), units), || {
+                self.api.forecast(location, units)
+            })
+            .await
+    }
+
+    /// `refresh_forecast` for air quality.
+    pub async fn refresh_air_quality(
+        &self,
+        location: &Location,
+    ) -> Result<Cached<AirQuality>, FetchError> {
+        self.air
+            .refresh(&place_key(location), || self.api.air_quality(location))
+            .await
+    }
+
     /// Uncached: only the property inspector's search box calls this.
     pub async fn search(&self, query: &str) -> Result<Vec<Place>, FetchError> {
         self.api.search(query).await

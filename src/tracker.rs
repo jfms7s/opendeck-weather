@@ -32,6 +32,9 @@ struct Tracked<V> {
     touched: Option<Instant>,
     revision: u64,
     shown: Option<Card>,
+    /// The dial turned while pressed since it went down, so its release
+    /// isn't a press.
+    turned_while_pressed: bool,
 }
 
 /// What a render read before it started building its card.
@@ -86,6 +89,7 @@ impl<V: Copy + Default + PartialEq> Tracker<V> {
                 touched: None,
                 revision: next_revision(),
                 shown: None,
+                turned_while_pressed: false,
             });
         if entry.settings != settings {
             entry.settings = settings;
@@ -174,6 +178,20 @@ impl<V: Copy + Default + PartialEq> Tracker<V> {
         let first = t.shown.is_none();
         t.shown = Some(card.clone());
         Frame::Send { first }
+    }
+
+    /// The dial turned while held down.
+    pub fn mark_pressed_turn(&self, id: &str) {
+        if let Some(mut t) = self.instances.get_mut(id) {
+            t.turned_while_pressed = true;
+        }
+    }
+
+    /// Whether the dial turned while held since the last call (clearing it).
+    pub fn take_pressed_turn(&self, id: &str) -> bool {
+        self.instances
+            .get_mut(id)
+            .is_some_and(|mut t| std::mem::take(&mut t.turned_while_pressed))
     }
 
     /// The last claimed frame never arrived: send the next one in full.
