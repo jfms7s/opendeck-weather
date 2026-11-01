@@ -47,8 +47,24 @@ pub trait Behavior: Send + Sync + 'static {
 
     fn key_press(view: Self::View) -> Self::View;
     fn dial_rotate(view: Self::View, ticks: i16) -> Self::View;
+    /// A turn while the dial is held down; the release that ends it is not
+    /// a press. By default the same as a plain turn.
+    fn dial_rotate_pressed(view: Self::View, ticks: i16) -> Self::View {
+        Self::dial_rotate(view, ticks)
+    }
     /// A dial press or a tap on its touch strip.
     fn dial_press(view: Self::View) -> Self::View;
+
+    /// Fetches this action's data again now, past the cache's TTL but not
+    /// its backoff after a failure (a held tap on the strip). By default
+    /// there is nothing to refresh.
+    async fn refresh(
+        _services: &Services,
+        _location: &Location,
+        _settings: &Settings,
+    ) -> Result<(), FetchError> {
+        Ok(())
+    }
 
     /// Fetches (through the shared cache) and builds the card for one
     /// instance. `utc_now` is the only clock read.
@@ -168,6 +184,54 @@ impl<B: Behavior> CardAction<B> {
         }
     }
 
+    fn on_rotate(&self, id: &str, ticks: i16, pressed: bool) {
+        if pressed {
+            self.tracker.mark_pressed_turn(id);
+            self.on_interaction(id, |v| B::dial_rotate_pressed(v, ticks));
+        } else {
+            self.on_interaction(id, |v| B::dial_rotate(v, ticks));
+        }
+    }
+
+    /// A new press starts clean, even if an earlier release went missing.
+    fn on_dial_down(&self, id: &str) {
+        self.tracker.take_pressed_turn(id);
+    }
+
+    /// The release ends a press, unless the dial turned while held.
+    fn on_dial_up(&self, id: &str) {
+        if !self.tracker.take_pressed_turn(id) {
+            self.on_interaction(id, B::dial_press);
+        }
+    }
+
+    /// A tap is a press; a held tap refreshes the data now, then redraws.
+    fn on_touch(&self, id: &str, hold: bool) {
+        if !hold {
+            self.on_interaction(id, B::dial_press);
+            return;
+        }
+        let (action, id) = (self.clone(), id.to_string());
+        tokio::spawn(async move {
+            action.refresh(&id).await;
+            if let Some(instance) = openaction::get_instance(id.clone()).await {
+                action.render_on(&id, &*instance).await;
+            }
+        });
+    }
+
+    async fn refresh(&self, id: &str) {
+        let Some(snapshot) = self.tracker.snapshot(id) else {
+            return;
+        };
+        let Some(location) = self.services.location_for(&snapshot.settings) else {
+            return;
+        };
+        if let Err(e) = B::refresh(&self.services, &location, &snapshot.settings).await {
+            log::warn!("{} refresh for {} failed: {e}", B::UUID, location.name);
+        }
+    }
+
     /// Answers the property inspector in the background: a search waits on
     /// the network.
     fn on_inspector_message(&self, id: String, payload: &Value) {
@@ -250,14 +314,19 @@ impl<B: Behavior> Action for CardAction<B> {
         instance: &Instance,
         _: &Settings,
         ticks: i16,
-        _pressed: bool,
+        pressed: bool,
     ) -> OpenActionResult<()> {
-        self.on_interaction(&instance.instance_id, |v| B::dial_rotate(v, ticks));
+        self.on_rotate(&instance.instance_id, ticks, pressed);
+        Ok(())
+    }
+
+    async fn dial_down(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
+        self.on_dial_down(&instance.instance_id);
         Ok(())
     }
 
     async fn dial_up(&self, instance: &Instance, _: &Settings) -> OpenActionResult<()> {
-        self.on_interaction(&instance.instance_id, B::dial_press);
+        self.on_dial_up(&instance.instance_id);
         Ok(())
     }
 
@@ -266,9 +335,9 @@ impl<B: Behavior> Action for CardAction<B> {
         instance: &Instance,
         _: &Settings,
         _position: (u16, u16),
-        _hold: bool,
+        hold: bool,
     ) -> OpenActionResult<()> {
-        self.on_interaction(&instance.instance_id, B::dial_press);
+        self.on_touch(&instance.instance_id, hold);
         Ok(())
     }
 
@@ -717,6 +786,115 @@ mod tests {
             }
             Ok(echo_card(view))
         }
+        async fn refresh(
+            _: &Services,
+            location: &Location,
+            _: &Settings,
+        ) -> Result<(), FetchError> {
+            *REFRESHES
+                .lock()
+                .unwrap()
+                .entry(location.name.clone())
+                .or_default() += 1;
+            Ok(())
+        }
+    }
+
+    /// `Echo::refresh` calls per location name (tests run in parallel, so
+    /// each test that refreshes uses its own name).
+    static REFRESHES: std::sync::LazyLock<Mutex<std::collections::HashMap<String, u32>>> =
+        std::sync::LazyLock::new(Mutex::default);
+
+    fn refreshes(name: &str) -> u32 {
+        REFRESHES.lock().unwrap().get(name).copied().unwrap_or(0)
+    }
+
+    fn located_at(name: &str) -> Settings {
+        let mut s = located();
+        s.location.as_mut().unwrap().name = name.into();
+        s
+    }
+
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn releasing_a_dial_turned_while_pressed_is_not_a_press() {
+        let action = echo();
+        action.on_settings("k", &located());
+        action.on_dial_down("k");
+        action.on_rotate("k", 2, true);
+        action.on_rotate("k", 1, true);
+        action.on_dial_up("k");
+        assert_eq!(
+            action.tracker.snapshot("k").unwrap().view,
+            3,
+            "no press on release"
+        );
+
+        action.on_dial_down("k");
+        action.on_dial_up("k");
+        assert_eq!(
+            action.tracker.snapshot("k").unwrap().view,
+            0,
+            "a plain press still is"
+        );
+
+        action.on_rotate("k", 4, false);
+        action.on_dial_up("k");
+        assert_eq!(
+            action.tracker.snapshot("k").unwrap().view,
+            0,
+            "an unpressed turn changes nothing"
+        );
+    }
+
+    #[test]
+    fn forecast_and_air_quality_turn_the_same_pressed_or_not() {
+        let days = crate::view_state::ForecastView::default();
+        assert_eq!(
+            forecast::Forecast::dial_rotate_pressed(days, 2),
+            forecast::Forecast::dial_rotate(days, 2)
+        );
+        let page = crate::view_state::AirQualityPage::Index;
+        assert_eq!(
+            air_quality::AirQuality::dial_rotate_pressed(page, 2),
+            air_quality::AirQuality::dial_rotate(page, 2)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_held_tap_refreshes_once_and_a_plain_tap_presses() {
+        let action = echo();
+        action.on_settings("k", &located_at("held tap"));
+        action.tracker.interact("k", |_| 5);
+        action.on_touch("k", true);
+        settle().await;
+        assert_eq!(refreshes("held tap"), 1);
+        assert_eq!(
+            action.tracker.snapshot("k").unwrap().view,
+            5,
+            "the view stays"
+        );
+
+        action.on_touch("k", false);
+        settle().await;
+        assert_eq!(action.tracker.snapshot("k").unwrap().view, 0);
+        assert_eq!(refreshes("held tap"), 1, "a plain tap doesn't refresh");
+    }
+
+    #[tokio::test]
+    async fn a_refresh_is_followed_by_a_redraw() {
+        let action = echo();
+        let key = FakeSurface::new("Keypad");
+        action.tracker.track("k", located_at("redraw"));
+        action.refresh("k").await;
+        action.render_on("k", &key).await;
+        assert_eq!(refreshes("redraw"), 1);
+        assert_eq!(key.take()[1], ("image", card::key_image(&echo_card(0))));
     }
 
     fn located() -> Settings {

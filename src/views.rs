@@ -194,6 +194,15 @@ pub fn weather(
                 .marked_stale(stale);
             }
         }
+        WeatherView::Day(ahead) => {
+            let days = ForecastView {
+                days: i32::from(ahead),
+                sun: false,
+            };
+            if let Some(card) = forecast(f, 0, days, now, stale) {
+                return card;
+            }
+        }
         WeatherView::Now => {}
     }
 
@@ -708,6 +717,24 @@ pub(crate) mod tests {
         let c = lisbon(&f, WeatherView::Details, now());
         assert_eq!(c.value, "14°");
         assert_eq!(c.label, "Clear");
+    }
+
+    #[test]
+    fn a_weather_day_view_shows_that_forecast_day() {
+        let f = sample();
+        let c = lisbon(&f, WeatherView::Day(1), now());
+        let expected = day(&f, 0, 1);
+        assert_eq!(c, expected, "what a Forecast dial shows for tomorrow");
+        assert_eq!(c.value, "29°/18°");
+        let stale = weather(
+            &f,
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Day(1),
+            now(),
+            true,
+        );
+        assert!(stale.stale);
     }
 
     #[test]

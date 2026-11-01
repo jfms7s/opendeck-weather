@@ -6,7 +6,8 @@
 //!   last press.
 //! - Dial: temperature, condition and the rain line (`Dry next 12h` too) in
 //!   place of the location name. Rotate to scroll the hourly forecast (up to
-//!   24h ahead), press or tap the strip for the details screen.
+//!   24h ahead), press and rotate to scroll the days (up to 6 ahead), press
+//!   or tap the strip for the details screen, hold the strip to refresh now.
 
 use super::Behavior;
 use crate::card::Card;
@@ -33,8 +34,23 @@ impl Behavior for Weather {
         view.scroll(ticks)
     }
 
+    fn dial_rotate_pressed(view: WeatherView, ticks: i16) -> WeatherView {
+        view.scroll_days(ticks)
+    }
+
     fn dial_press(view: WeatherView) -> WeatherView {
         view.toggle_details()
+    }
+
+    async fn refresh(
+        services: &Services,
+        location: &Location,
+        settings: &Settings,
+    ) -> Result<(), FetchError> {
+        services
+            .refresh_forecast(location, settings.units)
+            .await
+            .map(drop)
     }
 
     async fn card(
@@ -67,5 +83,17 @@ mod tests {
         assert_eq!(v, WeatherView::Hour(3));
         assert_eq!(Weather::key_press(v), WeatherView::Details);
         assert_eq!(Weather::dial_press(WeatherView::Details), WeatherView::Now);
+    }
+
+    #[test]
+    fn a_pressed_turn_scrolls_days_and_a_plain_one_hours() {
+        assert_eq!(
+            Weather::dial_rotate_pressed(WeatherView::Now, 1),
+            WeatherView::Day(1)
+        );
+        assert_eq!(
+            Weather::dial_rotate(WeatherView::Now, 1),
+            WeatherView::Hour(1)
+        );
     }
 }

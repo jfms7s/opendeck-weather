@@ -3,7 +3,8 @@
 //!
 //! - Key: shows the index. Press to page through the pollutants; it
 //!   returns to the index on its own.
-//! - Dial: rotate to page, press or tap the strip to jump back to the index.
+//! - Dial: rotate to page, press or tap the strip to jump back to the index,
+//!   hold the strip to refresh now.
 
 use super::Behavior;
 use crate::card::Card;
@@ -32,6 +33,14 @@ impl Behavior for AirQuality {
 
     fn dial_press(_: AirQualityPage) -> AirQualityPage {
         AirQualityPage::Index
+    }
+
+    async fn refresh(
+        services: &Services,
+        location: &Location,
+        _settings: &Settings,
+    ) -> Result<(), FetchError> {
+        services.refresh_air_quality(location).await.map(drop)
     }
 
     async fn card(
