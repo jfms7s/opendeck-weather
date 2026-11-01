@@ -11,7 +11,7 @@
 
 use crate::card::Card;
 use crate::model::Settings;
-use crate::scheduler::Wake;
+use crate::wake::Wake;
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

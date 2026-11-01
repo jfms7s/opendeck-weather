@@ -10,14 +10,15 @@ mod services;
 mod tracker;
 mod view_state;
 mod views;
+mod wake;
 mod wmo;
 
 use actions::GlobalSettingsHandler;
 use openaction::OpenActionResult;
 use openaction::global_events::set_global_event_handler;
-use scheduler::Wake;
 use services::Services;
 use std::sync::Arc;
+use wake::Wake;
 
 // Handlers never block (network work is spawned) and the plugin is idle
 // almost all the time, so two workers are plenty.
