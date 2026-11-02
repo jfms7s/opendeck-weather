@@ -407,8 +407,8 @@ enum InspectorMessage {
     Search { query: String },
     /// Which location instances without their own one use.
     GetDefaultLocation,
-    /// Make (or with `null`, clear) the plugin-wide default location.
-    SetDefaultLocation { location: Option<Location> },
+    /// Make `location` the plugin-wide default.
+    SetDefaultLocation { location: Location },
 }
 
 /// Replies to the property inspector (`sendToPropertyInspector`).
@@ -424,7 +424,19 @@ enum PluginMessage {
     },
     DefaultLocation {
         location: Option<Location>,
+        /// Set when saving it failed: the keys follow it until a restart.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
     },
+}
+
+/// The reply to `SetDefaultLocation`: the location either way (it is applied
+/// in memory regardless), plus the error when it couldn't be saved.
+fn default_location_reply(location: Option<Location>, saved: Result<(), String>) -> PluginMessage {
+    PluginMessage::DefaultLocation {
+        location,
+        error: saved.err(),
+    }
 }
 
 async fn answer(services: &Services, wake: &Wake, message: InspectorMessage) -> PluginMessage {
@@ -452,16 +464,23 @@ async fn answer(services: &Services, wake: &Wake, message: InspectorMessage) -> 
         }
         InspectorMessage::GetDefaultLocation => PluginMessage::DefaultLocation {
             location: services.default_location(),
+            error: None,
         },
         InspectorMessage::SetDefaultLocation { location } => {
+            let location = Some(location);
             let global = GlobalSettings {
                 default_location: location.clone(),
             };
-            if let Err(e) = openaction::set_global_settings(&global).await {
+            let saved = openaction::set_global_settings(&global)
+                .await
+                .map_err(|e| e.to_string());
+            if let Err(e) = &saved {
                 log::warn!("saving the default location failed: {e}");
             }
+            // Applied even when unsaved (ruling 2026-10-08): the keys follow
+            // it until a restart, and the reply says it wasn't saved.
             apply_default_location(services, wake, location.clone());
-            PluginMessage::DefaultLocation { location }
+            default_location_reply(location, saved)
         }
     }
 }
@@ -537,10 +556,30 @@ mod tests {
                 query: "Porto".into()
             }
         );
-        let msg: InspectorMessage =
-            serde_json::from_value(json!({"event": "setDefaultLocation", "location": null}))
-                .unwrap();
-        assert_eq!(msg, InspectorMessage::SetDefaultLocation { location: None });
+        let lisbon = Location {
+            name: "Lisbon".into(),
+            latitude: 38.72,
+            longitude: -9.13,
+            label: Some("Lisbon, Portugal".into()),
+        };
+        let msg: InspectorMessage = serde_json::from_value(json!({
+            "event": "setDefaultLocation",
+            "location": {"name": "Lisbon", "latitude": 38.72, "longitude": -9.13,
+                         "label": "Lisbon, Portugal"}
+        }))
+        .unwrap();
+        assert_eq!(
+            msg,
+            InspectorMessage::SetDefaultLocation { location: lisbon }
+        );
+        // Clearing the default isn't part of the protocol (no UI sends it):
+        // `send_to_plugin` ignores it as an unknown message.
+        assert!(
+            serde_json::from_value::<InspectorMessage>(
+                json!({"event": "setDefaultLocation", "location": null})
+            )
+            .is_err()
+        );
         let msg: InspectorMessage =
             serde_json::from_value(json!({"event": "getDefaultLocation"})).unwrap();
         assert_eq!(msg, InspectorMessage::GetDefaultLocation);
@@ -566,10 +605,35 @@ mod tests {
             serde_json::to_value(failed).unwrap(),
             json!({"event": "searchResults", "query": "Porto", "error": "timed out"})
         );
-        let default = PluginMessage::DefaultLocation { location: None };
+        let default = PluginMessage::DefaultLocation {
+            location: None,
+            error: None,
+        };
         assert_eq!(
             serde_json::to_value(default).unwrap(),
             json!({"event": "defaultLocation", "location": null})
+        );
+        let saved = default_location_reply(None, Ok(()));
+        assert_eq!(
+            serde_json::to_value(saved).unwrap(),
+            json!({"event": "defaultLocation", "location": null})
+        );
+    }
+
+    #[test]
+    fn an_unsaved_default_location_is_reported_to_the_inspector() {
+        let lisbon = Location {
+            name: "Lisbon".into(),
+            latitude: 38.72,
+            longitude: -9.13,
+            label: None,
+        };
+        let reply = default_location_reply(Some(lisbon), Err("closed".into()));
+        assert_eq!(
+            serde_json::to_value(reply).unwrap(),
+            json!({"event": "defaultLocation",
+                   "location": {"name": "Lisbon", "latitude": 38.72, "longitude": -9.13},
+                   "error": "closed"})
         );
     }
 
@@ -759,7 +823,7 @@ mod tests {
         Card::new(Glyph::Pin, view.to_string(), "label", "detail")
     }
 
-    /// Shows its view as the value; view 0 waits for `GATE` first, so a
+    /// Shows its view as the value; view 100 waits for `GATE` first, so a
     /// test can change the state while a render is in flight.
     struct Echo;
     static GATE: std::sync::LazyLock<Notify> = std::sync::LazyLock::new(Notify::new);

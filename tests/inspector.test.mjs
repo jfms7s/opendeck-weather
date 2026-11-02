@@ -155,3 +155,10 @@ test("Use for all actions is offered only when the own location is not already t
 	const [message] = pi.sent();
 	assert.deepEqual(message.payload, { event: "setDefaultLocation", location: LISBON });
 });
+
+test("an unsaved default location is reported in the status line", async () => {
+	const pi = await inspector({ location: { ...LISBON } });
+	pi.receive({ event: "defaultLocation", location: LISBON, error: "closed" });
+	assert.equal(pi.$("status").textContent, "Default not saved: closed");
+	assert.equal(pi.$("make-default").hidden, true, "still applied until a restart");
+});

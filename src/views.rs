@@ -451,31 +451,24 @@ pub fn forecast(
     Some(card.marked_stale(stale))
 }
 
-pub(crate) const AQI_GOOD: &str = "#22c55e";
-const AQI_FAIR: &str = "#84cc16";
-const AQI_MODERATE: &str = "#eab308";
-const AQI_POOR: &str = "#f97316";
-const AQI_VERY_POOR: &str = "#ef4444";
-const AQI_HAZARDOUS: &str = "#a855f7";
-
 /// Category name and color, using each scale's own official breakpoints.
 fn aqi_category(scale: AqiScale, aqi: f64) -> (&'static str, &'static str) {
     match scale {
         AqiScale::Us => match aqi {
-            a if a <= 50.0 => ("Good", AQI_GOOD),
-            a if a <= 100.0 => ("Moderate", AQI_MODERATE),
-            a if a <= 150.0 => ("Unhealthy (SG)", AQI_POOR),
-            a if a <= 200.0 => ("Unhealthy", AQI_VERY_POOR),
-            a if a <= 300.0 => ("Very unhealthy", AQI_HAZARDOUS),
-            _ => ("Hazardous", AQI_HAZARDOUS),
+            a if a <= 50.0 => ("Good", palette::AQI_GOOD),
+            a if a <= 100.0 => ("Moderate", palette::AQI_MODERATE),
+            a if a <= 150.0 => ("Unhealthy (SG)", palette::AQI_POOR),
+            a if a <= 200.0 => ("Unhealthy", palette::AQI_VERY_POOR),
+            a if a <= 300.0 => ("Very unhealthy", palette::AQI_HAZARDOUS),
+            _ => ("Hazardous", palette::AQI_HAZARDOUS),
         },
         AqiScale::European => match aqi {
-            a if a <= 20.0 => ("Good", AQI_GOOD),
-            a if a <= 40.0 => ("Fair", AQI_FAIR),
-            a if a <= 60.0 => ("Moderate", AQI_MODERATE),
-            a if a <= 80.0 => ("Poor", AQI_POOR),
-            a if a <= 100.0 => ("Very poor", AQI_VERY_POOR),
-            _ => ("Extremely poor", AQI_HAZARDOUS),
+            a if a <= 20.0 => ("Good", palette::AQI_GOOD),
+            a if a <= 40.0 => ("Fair", palette::AQI_FAIR),
+            a if a <= 60.0 => ("Moderate", palette::AQI_MODERATE),
+            a if a <= 80.0 => ("Poor", palette::AQI_POOR),
+            a if a <= 100.0 => ("Very poor", palette::AQI_VERY_POOR),
+            _ => ("Extremely poor", palette::AQI_HAZARDOUS),
         },
     }
 }
@@ -1187,8 +1180,8 @@ pub(crate) mod tests {
         let c = air_quality(&aq(), AqiScale::Us, AirQualityPage::Index, false);
         assert_eq!(c.value, "43");
         assert_eq!(c.label, "Good");
-        assert_eq!(c.accent, Some(AQI_GOOD));
-        assert_eq!(c.glyph, Glyph::Ring(AQI_GOOD));
+        assert_eq!(c.accent, Some(palette::AQI_GOOD));
+        assert_eq!(c.glyph, Glyph::Ring(palette::AQI_GOOD));
         let key = key_svg(&c);
         assert!(key.contains(">43<") && key.contains(">Good<"), "{key}");
         let eu = air_quality(&aq(), AqiScale::European, AirQualityPage::Index, false);

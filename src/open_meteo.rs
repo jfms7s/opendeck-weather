@@ -21,13 +21,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// How many days the Forecast action can show (today included).
 pub const FORECAST_DAYS: u8 = 7;
-const SEARCH_RESULTS: &str = "8";
+const SEARCH_RESULTS: u8 = 8;
 /// Longest search text forwarded to the geocoder; place names are short.
 pub const MAX_QUERY_CHARS: usize = 100;
 
 /// Open-Meteo's own local-time format with `timezone=auto`: no seconds, no
 /// offset (the offset comes separately as `utc_offset_seconds`).
 const LOCAL_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M";
+const LOCAL_DATE_FORMAT: &str = "%Y-%m-%d";
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum FetchError {
@@ -180,11 +181,12 @@ fn air_quality_url(location: &Location) -> Url {
 }
 
 fn geocoding_url(query: &str) -> Url {
+    let count = SEARCH_RESULTS.to_string();
     Url::parse_with_params(
         GEOCODING_URL,
         &[
             ("name", query.trim()),
-            ("count", SEARCH_RESULTS),
+            ("count", count.as_str()),
             ("language", "en"),
             ("format", "json"),
         ],
@@ -198,7 +200,7 @@ fn local_time(s: &str) -> Result<NaiveDateTime, FetchError> {
 }
 
 fn local_date(s: &str) -> Result<NaiveDate, FetchError> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+    NaiveDate::parse_from_str(s, LOCAL_DATE_FORMAT)
         .map_err(|e| FetchError::Parse(format!("bad date {s:?}: {e}")))
 }
 
@@ -716,5 +718,6 @@ mod tests {
     fn geocoding_url_encodes_the_query() {
         let url = geocoding_url(" São Paulo ").to_string();
         assert!(url.contains("name=S%C3%A3o+Paulo&"), "{url}");
+        assert!(url.contains("&count=8&"), "{url}");
     }
 }

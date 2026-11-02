@@ -1,7 +1,7 @@
 //! Colored weather icons on a 24x24 grid. `body` returns bare SVG elements
-//! so the key tile can nest them inside its own image; `svg` wraps them as a
-//! standalone document for a touch-strip pixmap (OpenDeck's strip renderer
-//! accepts an SVG string directly as a pixmap value).
+//! so the key tile can nest them inside its own image; `document` wraps them
+//! as a standalone document for a touch-strip pixmap (OpenDeck's strip
+//! renderer accepts an SVG string directly as a pixmap value).
 
 use crate::palette::{BACKGROUND, MUTED, STALE};
 use crate::wmo::Condition;
@@ -201,7 +201,7 @@ pub fn icon_sources() -> [(&'static str, Glyph); 4] {
                 is_day: true,
             },
         ),
-        ("airquality", Glyph::Ring(crate::views::AQI_GOOD)),
+        ("airquality", Glyph::Ring(crate::palette::AQI_GOOD)),
     ]
 }
 
@@ -331,7 +331,9 @@ pub(crate) mod tests {
         // Regenerate with: cargo test -- --ignored write_icon_sources
         for (name, glyph) in icon_sources() {
             let path = format!("{}/assets/icon-src/{name}.svg", env!("CARGO_MANIFEST_DIR"));
-            let committed = std::fs::read_to_string(&path).unwrap_or_default();
+            let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!("{path}: {e} (regenerate with `cargo test -- --ignored write_icon_sources`)")
+            });
             assert_eq!(committed, icon_document(glyph), "{path} is out of date");
         }
     }
