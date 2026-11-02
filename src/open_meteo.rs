@@ -21,6 +21,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// How many days the Forecast action can show (today included).
 pub const FORECAST_DAYS: u8 = 7;
+/// Hourly steps requested, from the current hour: 24 hours of dial
+/// scrolling from a value served up to 3 hours stale (`stale_after`), plus
+/// the current hour, rounded up. `forecast_days` still governs `daily`.
+pub const FORECAST_HOURS: u8 = 48;
+const _: () = assert!(
+    FORECAST_HOURS >= crate::view_state::WeatherView::MAX_HOURS_AHEAD + 4,
+    "the dial's last hour must be in a 3-hour-old response"
+);
 const SEARCH_RESULTS: u8 = 8;
 /// Longest search text forwarded to the geocoder; place names are short.
 pub const MAX_QUERY_CHARS: usize = 100;
@@ -160,6 +168,7 @@ fn forecast_url(location: &Location, units: Units) -> Url {
         ),
         ("timezone", "auto".into()),
         ("forecast_days", FORECAST_DAYS.to_string()),
+        ("forecast_hours", FORECAST_HOURS.to_string()),
     ]);
     if units == Units::Imperial {
         params.push(("temperature_unit", "fahrenheit".into()));
@@ -574,6 +583,13 @@ mod tests {
         assert!(url.contains("wind_speed_unit=mph"), "{url}");
         let metric = forecast_url(&lisbon(), Units::Metric).to_string();
         assert!(!metric.contains("temperature_unit"), "{metric}");
+    }
+
+    #[test]
+    fn forecast_url_asks_for_two_days_of_hours_and_a_week_of_days() {
+        let url = forecast_url(&lisbon(), Units::Metric).to_string();
+        assert!(url.contains("forecast_hours=48"), "{url}");
+        assert!(url.contains("forecast_days=7"), "{url}");
     }
 
     #[test]

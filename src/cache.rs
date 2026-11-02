@@ -16,6 +16,9 @@
 //! - `refresh` fetches even when the value is fresh (a "refresh now"
 //!   gesture), but keeps everything else: the backoff, the stale fallback,
 //!   and not waiting behind an in-flight fetch.
+//! - A key nobody has used for longer than `stale_after` is dropped the
+//!   next time a new key arrives, so searched-and-abandoned places don't
+//!   stay resident for the life of the process.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -79,6 +82,9 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
 
     fn slot(&self, key: &K) -> SharedSlot<V, E> {
         let mut slots = self.slots.lock().expect("cache map lock poisoned");
+        if !slots.contains_key(key) {
+            self.evict_abandoned(&mut slots);
+        }
         slots
             .entry(key.clone())
             .or_insert_with(|| {
@@ -92,6 +98,28 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
                 })
             })
             .clone()
+    }
+
+    /// Drops slots nobody holds whose value and last error are both older
+    /// than `stale_after`: places no instance shows any more. A key in use
+    /// is refreshed every few minutes (or keeps a recent error), so only
+    /// abandoned ones go, and only when a new key arrives.
+    fn evict_abandoned(&self, slots: &mut HashMap<K, SharedSlot<V, E>>) {
+        let now = Instant::now();
+        let recent = |at: Instant| now.duration_since(at) < self.policy.stale_after;
+        slots.retain(|_, cell| {
+            if Arc::strong_count(cell) > 1 {
+                return true;
+            }
+            let state = cell.state();
+            state.value.as_ref().is_some_and(|(at, _)| recent(*at))
+                || state.last_error.as_ref().is_some_and(|(at, _)| recent(*at))
+        });
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.slots.lock().expect("cache map lock poisoned").len()
     }
 
     /// The last good value, if it is still young enough to show at `now`.
@@ -297,6 +325,56 @@ mod tests {
             Err("down".into())
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2, "retried after 60 s");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn abandoned_keys_are_evicted_when_a_new_key_arrives() {
+        let cache = TestCache::new(POLICY);
+        let fetch = |v: u32| move || async move { Ok::<u32, String>(v) };
+        let fail = || async { Err::<u32, String>("down".into()) };
+        cache.get(&"old", fetch(1)).await.unwrap();
+        cache.get(&"failing", fail).await.unwrap_err();
+        tokio::time::advance(Duration::from_secs(3000)).await;
+        cache.get(&"recent", fetch(2)).await.unwrap();
+        tokio::time::advance(Duration::from_secs(601)).await;
+        // "old" and "failing" are now past stale_after; "recent" is not.
+        cache.get(&"new", fetch(3)).await.unwrap();
+        assert_eq!(cache.len(), 2, "old and failing evicted");
+        let calls = AtomicU32::new(0);
+        let again = cache
+            .get(&"recent", || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(9)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            *again.value, 9,
+            "past its TTL, so refetched; the slot survived"
+        );
+        assert_eq!(cache.len(), 2, "an existing key evicts nothing");
+        // A key with a recent error is kept, so its backoff holds.
+        cache.get(&"down", fail).await.unwrap_err();
+        tokio::time::advance(Duration::from_secs(30)).await;
+        cache.get(&"another", fetch(4)).await.unwrap();
+        assert_eq!(cache.len(), 4);
+        let calls = AtomicU32::new(0);
+        assert_eq!(get_key(&cache, "down", &calls).await, Err("down".into()));
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "still backing off");
+    }
+
+    async fn get_key(
+        cache: &TestCache,
+        key: &'static str,
+        calls: &AtomicU32,
+    ) -> Result<u32, String> {
+        cache
+            .get(&key, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(1)
+            })
+            .await
+            .map(|c| *c.value)
     }
 
     #[tokio::test(start_paused = true)]
