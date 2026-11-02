@@ -42,7 +42,7 @@ jobs:
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
       - run: node build.mjs
       # The property inspector's script, against a stub DOM (no dependencies).
       - run: node --test tests/*.test.mjs
@@ -117,7 +117,7 @@ jobs:
           echo "$out" | grep -q "missing CLI flag: -port"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
       - run: node build.mjs
 
   msrv:
@@ -162,7 +162,7 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           arguments: --all-features --locked
-          command: check advisories
+          command: check advisories sources
 
   # eng-metrics-lab (report-only): duplication, complexity and dead code; the collector picks up the artifact.
   quality:

@@ -16,7 +16,9 @@ node --test tests/*.test.mjs         # the property inspector's script (Node onl
 ```
 
 CI runs all of these, plus an aarch64 `cargo check`, an MSRV (`rust-version`) check
-and `cargo deny check advisories`. Always pass `--locked`. The release workflow runs
+and `cargo deny check advisories sources` (`deny.toml` allows crates from crates.io
+only). Always pass `--locked`. `.nvmrc` is CI's and the release's exact Node version;
+bump it by hand (Dependabot doesn't). The release workflow runs
 the same advisory scan before it builds, so `advisories` must stay green: to accept an
 advisory on purpose, add a `deny.toml` `[advisories] ignore = [{ id = "RUSTSEC-…",
 reason = "…" }]` entry with the reason, never leave the job red.
