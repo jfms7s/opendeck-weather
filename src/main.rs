@@ -2,6 +2,7 @@ mod actions;
 mod cache;
 mod card;
 mod glyphs;
+mod logging;
 mod model;
 mod open_meteo;
 mod palette;
@@ -24,8 +25,7 @@ use wake::Wake;
 // almost all the time, so two workers are plenty.
 #[tokio::main(worker_threads = 2)]
 async fn main() -> OpenActionResult<()> {
-    simplelog::SimpleLogger::init(log::LevelFilter::Info, simplelog::Config::default())
-        .expect("logger init");
+    logging::init();
 
     // One cache shared by all actions: a Weather key and a Forecast dial for
     // the same place cost a single forecast request per refresh window.
