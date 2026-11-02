@@ -18,7 +18,7 @@
 			"UUID": "com.jfms7s.weather.current",
 			"Name": "Weather",
 			"Icon": "icons/weather",
-			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like; on a dial, rotate to scroll the hourly forecast, press and rotate for the days, hold the strip to refresh",
+			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like, again for wind, UV, pressure and sunset; on a dial, rotate to scroll the hourly forecast, press and rotate for the days, hold the strip to refresh",
 			"Controllers": ["Keypad", "Encoder"],
 			"PropertyInspectorPath": "propertyInspector/index.html",
 			"States": [{ "Image": "icons/weather" }],
