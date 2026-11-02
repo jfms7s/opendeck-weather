@@ -171,13 +171,15 @@ repository), which the release notes link.
 - [ ] With the network down (e.g. `nmcli networking off`), keys keep showing their last
       data. A key given a new, never-fetched location shows "No data". After the network
       comes back, the keys recover within about a minute.
-- [ ] With requests hanging instead of failing
-      (`sudo iptables -A OUTPUT -p tcp --dport 443 -j DROP`), after about 10 minutes
+- [ ] With requests to Open-Meteo hanging instead of failing
+      (`sudo iptables -A OUTPUT -p tcp --dport 443 -d api.open-meteo.com,air-quality-api.open-meteo.com,geocoding-api.open-meteo.com -j DROP`;
+      only those hosts are blocked, and their names resolve once, when the rule is
+      added, so a DNS change mid-test can let a request through), after about 10 minutes
       the values turn gray with a clock badge. With the rule still in place, press keys
       and turn dials repeatedly over about a minute: every refresh now hangs, and
       presses and turns respond at once even then. Remove the rule
-      (`sudo iptables -D OUTPUT -p tcp --dport 443 -j DROP`): the keys recover within
-      about a minute.
+      (`sudo iptables -D OUTPUT -p tcp --dport 443 -d api.open-meteo.com,air-quality-api.open-meteo.com,geocoding-api.open-meteo.com -j DROP`):
+      the keys recover within about a minute.
 
 On a Mac (Apple Silicon), additionally - with the draft release's bundle (Releasing,
 step 4):
@@ -187,6 +189,9 @@ step 4):
       `com.apple.quarantine`.
 - [ ] Weather, Forecast and Air Quality refresh on keys and a dial; location search works.
 - [ ] With Wi-Fi off, keys keep their last data and recover after it comes back.
+
+The hanging-request case is Linux-only on purpose: the code has no platform-specific
+paths, and the Linux step covers it.
 
 <!-- smoke-checklist:end -->
 

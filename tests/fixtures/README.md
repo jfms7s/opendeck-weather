@@ -33,4 +33,7 @@ point, not the request - so these are the requests the plugin makes for Lisbon.)
 
 - `settings-v0.1.json` - not an API response: settings in the shapes v0.1 saved in
   OpenDeck profiles (fields appear only once the property inspector writes them).
-  They must keep loading; see `settings_saved_by_v0_1_still_load`.
+  They must keep loading; see `settings_saved_by_v0_1_still_load`. Hand-assembled
+  from what v0.1.1's property inspector wrote
+  (`7c9e791:assets/propertyInspector/index.html`), not captured from a profile;
+  entry 3 is synthetic and lists the fields in a different order on purpose.
