@@ -128,7 +128,9 @@ impl<B: Behavior> CardAction<B> {
         match B::card(&self.services, &location, settings, view, Utc::now()).await {
             Ok(card) => card,
             Err(e) => {
-                log::warn!("{} for {} failed: {e}", B::UUID, location.name);
+                // The cache logged the failed attempt once; a render that
+                // reuses its error says so only at debug, without the place.
+                log::debug!("{} has no data: {e}", B::UUID);
                 views::no_data(&location.name)
             }
         }
@@ -228,7 +230,8 @@ impl<B: Behavior> CardAction<B> {
             return;
         };
         if let Err(e) = B::refresh(&self.services, &location, &snapshot.settings).await {
-            log::warn!("{} refresh for {} failed: {e}", B::UUID, location.name);
+            // Already logged by the cache when the attempt ran.
+            log::debug!("{} refresh has no data: {e}", B::UUID);
         }
     }
 

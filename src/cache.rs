@@ -218,14 +218,23 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
             Err(e) => {
                 state.last_error = Some((started, e.clone()));
                 let fallback = self.usable(&state, started, true);
-                if fallback.is_some() {
-                    // Callers only see the error once the stale value runs
-                    // out, so say here that it's being papered over.
-                    log::warn!("refresh failed, showing older data: {e}");
-                }
+                // Logged here, once per real attempt (at most once per
+                // `retry_after` per key), rather than by every render that
+                // gets the error back: the backoff path above stays silent.
+                // The key isn't named, so no place reaches the log.
+                log::warn!("{}", failure_message(&e, fallback.is_some()));
                 fallback.ok_or(e)
             }
         }
+    }
+}
+
+/// The log line for a failed fetch attempt.
+fn failure_message(e: &impl Display, has_fallback: bool) -> String {
+    if has_fallback {
+        format!("refresh failed, showing older data: {e}")
+    } else {
+        format!("refresh failed, no data to fall back on: {e}")
     }
 }
 
@@ -254,6 +263,40 @@ mod tests {
             })
             .await
             .map(|c| *c.value)
+    }
+
+    #[test]
+    fn a_failure_says_whether_older_data_is_shown() {
+        assert_eq!(
+            failure_message(&"timed out", true),
+            "refresh failed, showing older data: timed out"
+        );
+        assert_eq!(
+            failure_message(&"timed out", false),
+            "refresh failed, no data to fall back on: timed out"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn renders_inside_the_backoff_reuse_the_error_without_another_attempt() {
+        // The failure is logged where the fetch ran, so one attempt is one
+        // log line however many renders ask in the meantime.
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        for _ in 0..5 {
+            assert_eq!(
+                get(&cache, &calls, Err("down".into())).await,
+                Err("down".into())
+            );
+            tokio::time::advance(Duration::from_secs(10)).await;
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one attempt in 50 s");
+        tokio::time::advance(Duration::from_secs(11)).await;
+        assert_eq!(
+            get(&cache, &calls, Err("down".into())).await,
+            Err("down".into())
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "retried after 60 s");
     }
 
     #[tokio::test(start_paused = true)]
