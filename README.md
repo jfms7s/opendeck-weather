@@ -97,14 +97,17 @@ Until a location (its own or the default) is set, an action shows a map pin and
 ## Installing
 
 Download the latest `.streamDeckPlugin` and `SHA256SUMS` from
-[Releases](https://github.com/jfms7s/opendeck-weather/releases), and check them:
+[Releases](https://github.com/jfms7s/opendeck-weather/releases), and verify that the
+bundle was built by this repository's release workflow:
 
 ```bash
-sha256sum -c SHA256SUMS
-gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather
+gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather \
+  --signer-workflow jfms7s/opendeck-weather/.github/workflows/release.yml
 ```
 
-On macOS, check the download with `shasum -a 256 -c SHA256SUMS` instead.
+Optionally, check the download wasn't corrupted with `sha256sum -c SHA256SUMS` (on
+macOS, `shasum -a 256 -c SHA256SUMS`). `SHA256SUMS` comes from the same release page,
+so it only catches a damaged download; the attestation is the check that matters.
 
 Then either double-click it (if your file manager associates the extension with
 OpenDeck) or unzip it into OpenDeck's plugin folder and restart OpenDeck (OpenDeck
@@ -114,10 +117,11 @@ only loads plugins at startup):
 - macOS: `~/Library/Application Support/opendeck/plugins/`
 
 On macOS, a bundle unzipped by hand (e.g. in Finder) is marked as downloaded and
-Gatekeeper refuses to start the binary. Clear the mark once:
+Gatekeeper refuses to start the binary. **Only if the attestation check above passed**,
+clear the mark on the plugin's binary:
 
 ```bash
-xattr -dr com.apple.quarantine ~/Library/Application\ Support/opendeck/plugins/com.jfms7s.weather.sdPlugin
+xattr -d com.apple.quarantine ~/Library/Application\ Support/opendeck/plugins/com.jfms7s.weather.sdPlugin/opendeck-weather-aarch64-apple-darwin
 ```
 
 ## Manual smoke-test checklist

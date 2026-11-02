@@ -47,8 +47,10 @@ Adding an action: see the checklist in the design note (vault,
   inspector.
 - **Version lives in two places**: `Cargo.toml` and `assets/manifest.json`; bump both
   (`build.mjs` and the release workflow check).
-- **Error strings carry no URLs** (they hold coordinates / search text): map
-  `reqwest` errors through `http_error`.
+- **No log line or error string carries coordinates or search text**: map
+  `reqwest` errors through `http_error`, log setting errors by category
+  (`model::field`), and keep openaction's raw inbound payloads out (the
+  `logging` module's filter, installed by `main.rs`).
 - **Contract tests** tie Rust to the shipped assets (manifest UUIDs, layout keys and
   colors, the property inspector's defaults / `data-action` UUIDs / day options /
   `maxlength`). Change both sides together.

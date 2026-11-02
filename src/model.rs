@@ -99,8 +99,15 @@ fn fields(json: &Value) -> Fields {
 fn field<T: DeserializeOwned>(fields: &Fields, key: &str) -> Option<T> {
     let value = fields.get(key).filter(|v| !v.is_null())?;
     T::deserialize(value)
-        .inspect_err(|e| log::warn!("ignoring unreadable setting {key:?}: {e}"))
+        .inspect_err(|e| log::warn!("{}", unreadable(key, e)))
         .ok()
+}
+
+/// The log line for a setting that didn't parse. Only the error's category:
+/// serde's messages quote the offending value, which for a location is its
+/// coordinates.
+fn unreadable(key: &str, e: &serde_json::Error) -> String {
+    format!("ignoring unreadable setting {key:?} ({:?})", e.classify())
 }
 
 impl Settings {
@@ -220,6 +227,21 @@ pub struct Place {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_unreadable_setting_is_logged_without_its_value() {
+        let json = serde_json::json!({"location": {"name": "Lisbon",
+            "latitude": "38.72509", "longitude": -9.13}});
+        let fields = super::fields(&json);
+        assert_eq!(super::field::<super::Location>(&fields, "location"), None);
+        let e = super::Location::deserialize(&fields["location"]).unwrap_err();
+        let line = super::unreadable("location", &e);
+        assert_eq!(line, "ignoring unreadable setting \"location\" (Data)");
+        assert!(
+            !line.contains("38.72509") && !line.contains("string"),
+            "{line}"
+        );
+    }
+
     use super::*;
 
     fn lisbon() -> Location {
