@@ -160,6 +160,22 @@ pub struct Current {
     pub wind_speed: f64,
     pub code: u8,
     pub is_day: bool,
+    /// The second details page's values. Each is optional on its own (UV is
+    /// `null` at night for some models), so a missing one never drops the
+    /// rest of the current conditions.
+    pub extra: CurrentExtra,
+}
+
+/// Current values only the second Weather details page shows.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CurrentExtra {
+    /// Degrees, meteorological: where the wind comes from, 0 = north.
+    pub wind_direction: Option<f64>,
+    /// In the wind speed's unit.
+    pub wind_gusts: Option<f64>,
+    /// Mean sea-level pressure, hPa.
+    pub pressure: Option<f64>,
+    pub uv_index: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

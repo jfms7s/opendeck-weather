@@ -5,7 +5,9 @@
 //! lives in the pure `parse_*` functions, which are tested against real
 //! captured responses in `tests/fixtures/`.
 
-use crate::model::{AirQuality, Current, Day, Forecast, Hour, Location, Place, Units};
+use crate::model::{
+    AirQuality, Current, CurrentExtra, Day, Forecast, Hour, Location, Place, Units,
+};
 use chrono::{NaiveDate, NaiveDateTime};
 use reqwest::Url;
 use serde::Deserialize;
@@ -143,7 +145,9 @@ fn forecast_url(location: &Location, units: Units) -> Url {
     params.extend([
         (
             "current",
-            "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m".into(),
+            "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m,\
+             wind_direction_10m,wind_gusts_10m,pressure_msl,uv_index"
+                .into(),
         ),
         (
             "hourly",
@@ -216,6 +220,10 @@ struct RawCurrent {
     wind_speed_10m: Option<f64>,
     weather_code: Option<u8>,
     is_day: Option<u8>,
+    wind_direction_10m: Option<f64>,
+    wind_gusts_10m: Option<f64>,
+    pressure_msl: Option<f64>,
+    uv_index: Option<f64>,
 }
 
 /// Every series is nullable per entry: Open-Meteo pads models that don't
@@ -274,6 +282,13 @@ pub fn parse_forecast(json: &str) -> Result<Forecast, FetchError> {
             wind_speed,
             code,
             is_day: c.is_day.is_none_or(|d| d != 0),
+            // Outside the match on purpose: none of these may drop the block.
+            extra: CurrentExtra {
+                wind_direction: c.wind_direction_10m,
+                wind_gusts: c.wind_gusts_10m,
+                pressure: c.pressure_msl,
+                uv_index: c.uv_index,
+            },
         }),
         _ => None,
     };
@@ -482,6 +497,44 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_second_details_pages_values_without_requiring_them() {
+        let with = |uv: &str| {
+            format!(
+                r#"{{
+            "utc_offset_seconds": 0,
+            "current": {{"time":"2026-09-25T22:00","temperature_2m":20,"apparent_temperature":19,
+                        "relative_humidity_2m":50,"wind_speed_10m":5,"weather_code":0,"is_day":0,
+                        "wind_direction_10m":315,"wind_gusts_10m":34.6,"pressure_msl":1016.2,
+                        "uv_index":{uv}}},
+            "hourly": {{"time":[],"temperature_2m":[],"weather_code":[],
+                       "precipitation_probability":[],"is_day":[]}},
+            "daily": {{"time":[],"weather_code":[],"temperature_2m_max":[],
+                      "temperature_2m_min":[],"precipitation_probability_max":[],
+                      "sunrise":[],"sunset":[]}}
+        }}"#
+            )
+        };
+        let f = parse_forecast(&with("6.6")).unwrap();
+        assert_eq!(
+            f.current.unwrap().extra,
+            CurrentExtra {
+                wind_direction: Some(315.0),
+                wind_gusts: Some(34.6),
+                pressure: Some(1016.2),
+                uv_index: Some(6.6),
+            }
+        );
+        // A null UV at night keeps the current conditions.
+        let night = parse_forecast(&with("null")).unwrap().current.unwrap();
+        assert_eq!(night.temperature, 20.0);
+        assert_eq!(night.extra.uv_index, None);
+        assert_eq!(night.extra.pressure, Some(1016.2));
+        // A response captured before these were requested has none of them.
+        let old = parse_forecast(FORECAST).unwrap().current.unwrap();
+        assert_eq!(old.extra, CurrentExtra::default());
+    }
+
+    #[test]
     fn parses_a_real_air_quality_response() {
         let aq = parse_air_quality(AIR_QUALITY).unwrap();
         assert_eq!(aq.us_aqi, Some(43.0));
@@ -519,6 +572,31 @@ mod tests {
         assert!(url.contains("wind_speed_unit=mph"), "{url}");
         let metric = forecast_url(&lisbon(), Units::Metric).to_string();
         assert!(!metric.contains("temperature_unit"), "{metric}");
+    }
+
+    #[test]
+    fn forecast_url_requests_the_second_details_pages_values() {
+        for units in [Units::Metric, Units::Imperial] {
+            let url = forecast_url(&lisbon(), units);
+            let current = url
+                .query_pairs()
+                .find(|(k, _)| k == "current")
+                .unwrap()
+                .1
+                .into_owned();
+            let fields: Vec<&str> = current.split(',').collect();
+            for field in [
+                "wind_speed_10m",
+                "wind_direction_10m",
+                "wind_gusts_10m",
+                "pressure_msl",
+                "uv_index",
+            ] {
+                assert!(fields.contains(&field), "{field} in {current}");
+            }
+            // Pressure always comes in hPa; inHg is converted for display.
+            assert!(!url.as_str().contains("pressure_unit"), "{url}");
+        }
     }
 
     /// A local plain-HTTP server that answers every request with a tiny

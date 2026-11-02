@@ -3,8 +3,8 @@
 //! the actions apply these on input and `views` reads them; the tracker
 //! stores them without knowing what they mean.
 
-/// Weather: the resting screen, an hour or a day ahead, or the details
-/// screen.
+/// Weather: the resting screen, an hour or a day ahead, or one of the two
+/// details pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeatherView {
     #[default]
@@ -13,7 +13,10 @@ pub enum WeatherView {
     Hour(u8),
     /// Days after today, `1..=MAX_DAYS_AHEAD` (a dial turned while pressed).
     Day(u8),
+    /// High/low, feels-like, wind speed and humidity.
     Details,
+    /// Wind direction and gusts, UV index, pressure and the next sun event.
+    MoreDetails,
 }
 
 impl WeatherView {
@@ -51,10 +54,12 @@ impl WeatherView {
         }
     }
 
-    /// Opens the details screen, or closes it back to now.
-    pub fn toggle_details(self) -> Self {
+    /// A press: from any other screen to the first details page, then the
+    /// second, then back to now.
+    pub fn next_details(self) -> Self {
         match self {
-            WeatherView::Details => WeatherView::Now,
+            WeatherView::Details => WeatherView::MoreDetails,
+            WeatherView::MoreDetails => WeatherView::Now,
             _ => WeatherView::Details,
         }
     }
@@ -128,6 +133,7 @@ mod tests {
             WeatherView::Hour(WeatherView::MAX_HOURS_AHEAD)
         );
         assert_eq!(WeatherView::Details.scroll(1), WeatherView::Hour(1));
+        assert_eq!(WeatherView::MoreDetails.scroll(1), WeatherView::Hour(1));
     }
 
     #[test]
@@ -149,9 +155,22 @@ mod tests {
     }
 
     #[test]
-    fn weather_details_toggle_returns_to_now() {
-        assert_eq!(WeatherView::Hour(5).toggle_details(), WeatherView::Details);
-        assert_eq!(WeatherView::Details.toggle_details(), WeatherView::Now);
+    fn weather_presses_cycle_through_both_details_pages_back_to_now() {
+        let pages: Vec<_> =
+            std::iter::successors(Some(WeatherView::Now), |v| Some(v.next_details()))
+                .take(4)
+                .collect();
+        assert_eq!(
+            pages,
+            [
+                WeatherView::Now,
+                WeatherView::Details,
+                WeatherView::MoreDetails,
+                WeatherView::Now
+            ]
+        );
+        assert_eq!(WeatherView::Hour(5).next_details(), WeatherView::Details);
+        assert_eq!(WeatherView::Day(2).next_details(), WeatherView::Details);
     }
 
     #[test]

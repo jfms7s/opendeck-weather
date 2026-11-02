@@ -24,13 +24,18 @@ hour, or rain all 12 hours), the card shows the location name and condition as b
 
 - **Key** - the rain line replaces the condition only when rain starts or stops within
   12 hours, so a dry day still shows the sky. Press for today's high/low and the "feels
-  like" temperature.
+  like" temperature; press again for the UV index (colored by its WHO band: low,
+  moderate, high, very high, extreme) with the wind direction, speed and gusts
+  (`NW 18 · gusts 35`); a third press goes back.
 - **Dial** - the rain line replaces the location name under the condition. Rotate to
   scroll the hourly forecast up to 24 hours ahead (time, temperature, chance of rain);
   press and turn to scroll the days instead, up to 6 days ahead (the same card a
   Forecast dial shows for that day). Press the dial or tap the strip for the details
-  screen: high/low, feels-like, wind and humidity. Releasing the dial after a press and
-  turn doesn't open the details.
+  screen: high/low, feels-like, wind and humidity. Press or tap again for the second
+  page: the UV index, wind direction, speed and gusts, sea-level pressure (hPa, or inHg
+  with Imperial units) and the next sunrise or sunset (`Sunset 2h10` within 12 hours,
+  `Sunset 19:28` beyond). A third press goes back. A value the forecast doesn't give
+  shows `--`. Releasing the dial after a press and turn doesn't open the details.
 
 ### Forecast
 
@@ -138,11 +143,13 @@ repository), which the release notes link.
       under the condition, matching the hourly forecast's chance of rain when rotated;
       a Weather key shows the same `Rain at` / `Rain until` line instead of the
       condition only when rain starts or stops within 12 hours.
-- [ ] Pressing the Weather key shows high/low and "Feels ..."; about 15s later it goes
-      back to the current temperature.
+- [ ] Pressing the Weather key shows high/low and "Feels ..."; pressing again shows
+      `UV n` (colored) over `NW 18 · gusts 35`-style wind; a third press returns to the
+      current temperature. About 15s after the last press it goes back on its own.
 - [ ] On a dial, rotating Weather clockwise steps through the hours (the label shows the
       hour, e.g. `16:00`). It stops at +24h, and rotating back stops at "now". Pressing
-      shows the details screen.
+      shows the details screen; pressing again shows the second page with pressure and
+      `Sunset ...` / `Sunrise ...` on its last line.
 - [ ] On a dial, pressing and turning Weather steps through the days (tomorrow's
       high/low, as on a Forecast dial), stops at 6 days ahead, and back at "now";
       releasing the dial afterwards does not open the details screen.

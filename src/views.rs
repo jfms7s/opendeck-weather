@@ -183,6 +183,14 @@ pub fn weather(
                 return card.marked_stale(stale);
             }
         }
+        WeatherView::MoreDetails => {
+            // Every value missing: skipped, like the first page without data.
+            if let Some(card) =
+                weather_more_details(f, observed, hour_now.map(|(_, h)| h), units, now)
+            {
+                return card.marked_stale(stale);
+            }
+        }
         WeatherView::Hour(ahead) => {
             if let Some(hour) = hour_now.and_then(|(i, _)| f.hourly.get(i + usize::from(ahead))) {
                 return Card::new(
@@ -272,6 +280,124 @@ fn weather_details(
         None => (condition(code), "Wind -- · Hum --".to_string()),
     };
     Some(Card::new(weather_glyph(code, is_day), value, label, detail))
+}
+
+/// 16-point compass name of a meteorological wind direction (degrees the
+/// wind comes from, 0 = north).
+fn compass(degrees: f64) -> &'static str {
+    const POINTS: [&str; 16] = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW",
+        "NW", "NNW",
+    ];
+    // Each point covers 22.5°, centred on it: N is 348.75..11.25.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let i = ((degrees.rem_euclid(360.0) / 22.5).round() as usize) % POINTS.len();
+    POINTS[i]
+}
+
+/// The WHO UV-index band colour for a rounded index: Low 0-2, Moderate 3-5,
+/// High 6-7, Very high 8-10, Extreme 11+.
+fn uv_colour(index: i64) -> &'static str {
+    match index {
+        ..=2 => palette::UV_LOW,
+        3..=5 => palette::UV_MODERATE,
+        6..=7 => palette::UV_HIGH,
+        8..=10 => palette::UV_VERY_HIGH,
+        _ => palette::UV_EXTREME,
+    }
+}
+
+/// hPa per inch of mercury.
+const HPA_PER_INHG: f64 = 33.863_886;
+
+fn pressure(hpa: Option<f64>, units: Units) -> String {
+    match (hpa, units) {
+        (Some(p), Units::Metric) => format!("{} hPa", whole(p)),
+        (Some(p), Units::Imperial) => format!("{:.2} inHg", p / HPA_PER_INHG),
+        (None, Units::Metric) => "-- hPa".to_string(),
+        (None, Units::Imperial) => "-- inHg".to_string(),
+    }
+}
+
+/// How far ahead the sun line counts down; past it the line shows a clock.
+const SUN_COUNTDOWN_HOURS: i64 = 12;
+
+/// The next sunrise or sunset after `now`: `Sunset 2h10` (or `Sunset 45m`)
+/// within the countdown window, `Sunrise 07:26` beyond it. `None` when the
+/// forecast has no sun times for today or tomorrow.
+fn next_sun(f: &Forecast, now: NaiveDateTime) -> Option<String> {
+    let (name, at) = f
+        .daily
+        .iter()
+        .filter(|d| d.date >= now.date())
+        .take(2)
+        .flat_map(|d| [("Sunrise", d.sunrise), ("Sunset", d.sunset)])
+        .filter_map(|(name, t)| t.filter(|t| *t > now).map(|t| (name, t)))
+        .min_by_key(|(_, t)| *t)?;
+    let left = at - now;
+    Some(if left >= Duration::hours(SUN_COUNTDOWN_HOURS) {
+        format!("{name} {}", at.format("%H:%M"))
+    } else if left >= Duration::hours(1) {
+        format!("{name} {}h{:02}", left.num_hours(), left.num_minutes() % 60)
+    } else {
+        // At least a minute, so it never reads "0m" while still ahead.
+        format!("{name} {}m", left.num_minutes().max(1))
+    })
+}
+
+/// The second details page: the UV index (coloured by its band) as the
+/// value, wind direction, speed and gusts as the label (and a key's line),
+/// pressure and the next sunrise or sunset as the dial's detail. A missing
+/// value shows `--` in its place; `None` when all of UV, direction, gusts,
+/// pressure and the sun line are missing (or there is nothing for "now" at
+/// all), so the press shows the resting screen rather than a page of dashes.
+fn weather_more_details(
+    f: &Forecast,
+    observed: Option<&Current>,
+    hour_now: Option<&Hour>,
+    units: Units,
+    now: NaiveDateTime,
+) -> Option<Card> {
+    let extra = observed.map(|c| c.extra).unwrap_or_default();
+    let sun = next_sun(f, now);
+    if extra.uv_index.is_none()
+        && extra.wind_direction.is_none()
+        && extra.wind_gusts.is_none()
+        && extra.pressure.is_none()
+        && sun.is_none()
+    {
+        return None;
+    }
+    let glyph = match (observed, hour_now) {
+        (Some(c), _) => weather_glyph(c.code, c.is_day),
+        (None, Some(h)) => weather_glyph(h.code, h.is_day),
+        // As on the first page: nothing for "now" means "No data".
+        (None, None) => return None,
+    };
+    let dashes = |x: Option<f64>| x.map_or("--".to_string(), |x| whole(x).to_string());
+    let wind = match observed {
+        Some(c) => format!(
+            "{} {} · gusts {}",
+            extra.wind_direction.map_or("--", compass),
+            whole(c.wind_speed),
+            dashes(extra.wind_gusts)
+        ),
+        None => "Wind --".to_string(),
+    };
+    let detail = match sun {
+        Some(sun) => format!("{} · {sun}", pressure(extra.pressure, units)),
+        None => pressure(extra.pressure, units),
+    };
+    let accent = extra.uv_index.map(|uv| uv_colour(whole(uv)));
+    Some(
+        Card::new(
+            glyph,
+            format!("UV {}", dashes(extra.uv_index)),
+            wind,
+            detail,
+        )
+        .with_accent(accent),
+    )
 }
 
 /// The day `base_day` days after today, stepped `view.days` further and
@@ -393,7 +519,7 @@ pub fn air_quality(aq: &AirQuality, scale: AqiScale, page: AirQualityPage, stale
 pub(crate) mod tests {
     use super::*;
     use crate::card::key_svg;
-    use crate::model::{Current, Day, Hour};
+    use crate::model::{Current, CurrentExtra, Day, Hour};
     use chrono::NaiveDate;
 
     fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
@@ -413,6 +539,12 @@ pub(crate) mod tests {
                 wind_speed: 12.3,
                 code: 2,
                 is_day: true,
+                extra: CurrentExtra {
+                    wind_direction: Some(315.0),
+                    wind_gusts: Some(34.6),
+                    pressure: Some(1016.2),
+                    uv_index: Some(6.6),
+                },
             }),
             hourly: (0..48)
                 .map(|h| Hour {
@@ -721,6 +853,137 @@ pub(crate) mod tests {
         let c = lisbon(&f, WeatherView::Details, now());
         assert_eq!(c.value, "14°");
         assert_eq!(c.label, "Clear");
+    }
+
+    #[test]
+    fn second_weather_details_page_shows_wind_uv_pressure_and_sunset() {
+        let c = lisbon(&sample(), WeatherView::MoreDetails, now());
+        assert_eq!(c.value, "UV 7");
+        assert_eq!(c.accent, Some(palette::UV_HIGH));
+        assert_eq!(c.label, "NW 12 · gusts 35");
+        assert_eq!(c.detail, "1016 hPa · Sunset 4h48");
+        assert_eq!(c.key_line(), "NW 12 · gusts 35", "a key shows the wind");
+        let key = key_svg(&c);
+        assert!(
+            key.contains(">UV 7<") && key.contains(">NW 12 · gusts 35<"),
+            "{key}"
+        );
+        assert!(!key.contains("hPa"), "pressure is dial-only: {key}");
+        assert_ne!(c, lisbon(&sample(), WeatherView::Details, now()));
+    }
+
+    #[test]
+    fn second_details_page_gives_pressure_in_inches_of_mercury_under_imperial() {
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Imperial,
+            WeatherView::MoreDetails,
+            now(),
+            false,
+        );
+        assert_eq!(c.detail, "30.01 inHg · Sunset 4h48");
+        assert_eq!(c.label, "NW 12 · gusts 35", "already in mph");
+    }
+
+    #[test]
+    fn compass_points_split_at_their_boundaries() {
+        assert_eq!(compass(0.0), "N");
+        assert_eq!(compass(11.24), "N");
+        assert_eq!(compass(11.25), "NNE");
+        assert_eq!(compass(348.74), "NNW");
+        assert_eq!(compass(348.75), "N");
+        assert_eq!(compass(360.0), "N");
+        assert_eq!(compass(90.0), "E");
+        assert_eq!(compass(180.0), "S");
+        assert_eq!(compass(270.0), "W");
+        assert_eq!(compass(315.0), "NW");
+        assert_eq!(compass(-45.0), "NW");
+    }
+
+    #[test]
+    fn uv_bands_follow_the_who_boundaries() {
+        for (index, colour) in [
+            (0, palette::UV_LOW),
+            (2, palette::UV_LOW),
+            (3, palette::UV_MODERATE),
+            (5, palette::UV_MODERATE),
+            (6, palette::UV_HIGH),
+            (7, palette::UV_HIGH),
+            (8, palette::UV_VERY_HIGH),
+            (10, palette::UV_VERY_HIGH),
+            (11, palette::UV_EXTREME),
+            (14, palette::UV_EXTREME),
+        ] {
+            assert_eq!(uv_colour(index), colour, "UV {index}");
+        }
+        let mut f = sample();
+        f.current.as_mut().unwrap().extra.uv_index = Some(2.4);
+        let c = lisbon(&f, WeatherView::MoreDetails, now());
+        assert_eq!(
+            (c.value.as_str(), c.accent),
+            ("UV 2", Some(palette::UV_LOW))
+        );
+    }
+
+    #[test]
+    fn the_sun_line_counts_down_to_the_next_event_then_shows_a_clock() {
+        let f = sample();
+        assert_eq!(next_sun(&f, at(25, 19, 0)).unwrap(), "Sunset 28m");
+        assert_eq!(next_sun(&f, at(25, 19, 27)).unwrap(), "Sunset 1m");
+        assert_eq!(next_sun(&f, at(25, 17, 28)).unwrap(), "Sunset 2h00");
+        // After sunset: tomorrow's sunrise, a countdown within 12 hours.
+        // At sunset and after: tomorrow's sunrise, still within 12 hours.
+        assert_eq!(next_sun(&f, at(25, 19, 28)).unwrap(), "Sunrise 11h58");
+        assert_eq!(next_sun(&f, at(25, 20, 0)).unwrap(), "Sunrise 11h26");
+        // Before dawn: today's sunrise.
+        assert_eq!(next_sun(&f, at(25, 5, 0)).unwrap(), "Sunrise 2h26");
+        assert_eq!(next_sun(&f, at(25, 7, 0)).unwrap(), "Sunrise 26m");
+        // Twelve hours or more ahead: the clock time.
+        assert_eq!(next_sun(&f, at(25, 7, 28)).unwrap(), "Sunset 19:28");
+        assert_eq!(next_sun(&f, at(25, 7, 29)).unwrap(), "Sunset 11h59");
+        assert_eq!(next_sun(&sample_days(25, 3), now()), None, "no sun times");
+    }
+
+    #[test]
+    fn a_missing_value_shows_dashes_on_its_own_line_only() {
+        let mut f = sample();
+        f.current.as_mut().unwrap().extra = CurrentExtra {
+            uv_index: None,
+            wind_gusts: None,
+            ..f.current.as_ref().unwrap().extra
+        };
+        let c = lisbon(&f, WeatherView::MoreDetails, now());
+        assert_eq!((c.value.as_str(), c.accent), ("UV --", None));
+        assert_eq!(c.label, "NW 12 · gusts --");
+        assert_eq!(c.detail, "1016 hPa · Sunset 4h48");
+        // The resting screen and the first page don't need the new values.
+        assert_eq!(lisbon(&f, WeatherView::Now, now()).value, "22°");
+        assert_eq!(lisbon(&f, WeatherView::Details, now()).label, "Feels 20°");
+    }
+
+    #[test]
+    fn a_second_details_page_with_nothing_to_show_is_skipped() {
+        let mut f = sample_days(25, 3); // no sun times
+        f.current.as_mut().unwrap().extra = CurrentExtra::default();
+        let c = lisbon(&f, WeatherView::MoreDetails, now());
+        assert_eq!(c, lisbon(&f, WeatherView::Now, now()), "the resting screen");
+    }
+
+    #[test]
+    fn a_stale_second_details_page_ignores_the_old_observation() {
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Metric,
+            WeatherView::MoreDetails,
+            now(),
+            true,
+        );
+        assert_eq!(c.value, "UV --");
+        assert_eq!(c.label, "Wind --");
+        assert_eq!(c.detail, "-- hPa · Sunset 4h48");
+        assert!(c.stale);
     }
 
     #[test]
