@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "recorded_at": "2026-11-01T17:47:06Z",
-  "commit": "2143feb34b584a8e95137cc21672d4634c80e0d4",
-  "duplication_percent": 1.53,
+  "recorded_at": "2026-11-02T00:36:57Z",
+  "commit": "b8fc1649602a3d14ab1787f8c9bcce014c53da1a",
+  "duplication_percent": 2.03,
   "dead_code_total": 0,
   "complexity_threshold": 10,
-  "functions_over_threshold": 4,
+  "functions_over_threshold": 5,
   "cognitive_threshold": 15,
-  "cognitive_over_threshold": 1,
-  "coverage_lines_percent": 82.94
+  "cognitive_over_threshold": 2,
+  "coverage_lines_percent": 85.5
 }
