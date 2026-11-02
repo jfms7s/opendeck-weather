@@ -20,3 +20,13 @@ pub const UV_MODERATE: &str = "#eab308";
 pub const UV_HIGH: &str = "#f97316";
 pub const UV_VERY_HIGH: &str = "#ef4444";
 pub const UV_EXTREME: &str = "#a855f7";
+
+/// Air-quality category colours, shared by the US and European scales
+/// (`views::aqi_category` maps each scale's bands onto them) and the Air
+/// Quality icon.
+pub const AQI_GOOD: &str = "#22c55e";
+pub const AQI_FAIR: &str = "#84cc16";
+pub const AQI_MODERATE: &str = "#eab308";
+pub const AQI_POOR: &str = "#f97316";
+pub const AQI_VERY_POOR: &str = "#ef4444";
+pub const AQI_HAZARDOUS: &str = "#a855f7";

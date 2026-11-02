@@ -171,6 +171,7 @@
 			if (payload.event === "defaultLocation") {
 				defaultLocation = payload.location || null;
 				showLocation();
+				if (payload.error) $("status").textContent = "Default not saved: " + payload.error;
 				return;
 			}
 			if (payload.event !== "searchResults") return;

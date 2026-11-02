@@ -10,7 +10,7 @@
 use super::Behavior;
 use crate::card::Card;
 use crate::model::{Location, Settings};
-use crate::open_meteo::FetchError;
+use crate::open_meteo::{FORECAST_DAYS, FetchError};
 use crate::services::Services;
 use crate::view_state::ForecastView;
 use crate::views;
@@ -56,14 +56,36 @@ impl Behavior for Forecast {
     ) -> Result<Card, FetchError> {
         let f = services.forecast(location, settings.units).await?;
         let now = f.value.local_now(utc_now);
-        Ok(views::forecast(&f.value, settings.day, view, now, f.stale)
-            .unwrap_or_else(|| views::no_data(&location.name)))
+        Ok(
+            views::forecast(&f.value, resting_day(settings), view, now, f.stale)
+                .unwrap_or_else(|| views::no_data(&location.name)),
+        )
     }
+}
+
+/// The configured day, clamped to the forecast: a hand-edited `day: 9`
+/// shows the last day rather than wrapping round to day 2.
+fn resting_day(settings: &Settings) -> u8 {
+    settings.day.min(FORECAST_DAYS - 1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_out_of_range_day_setting_is_clamped_to_the_last_day() {
+        let day = |day| {
+            resting_day(&Settings {
+                day,
+                ..Settings::default()
+            })
+        };
+        assert_eq!(day(9), 6);
+        assert_eq!(day(6), 6);
+        assert_eq!(day(3), 3);
+        assert_eq!(day(0), 0);
+    }
     use crate::views::tests::sample_days;
 
     #[test]
