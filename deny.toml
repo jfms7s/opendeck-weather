@@ -1,0 +1,4 @@
+# Crates may only come from crates.io (cargo-deny's default allow-registry).
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

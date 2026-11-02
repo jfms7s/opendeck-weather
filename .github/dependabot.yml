@@ -1,11 +1,17 @@
-# Keeps the SHA-pinned actions and the locked crates moving.
+# Keeps the SHA-pinned actions and the locked crates moving, with a week's
+# cooldown so a bad release can be yanked first. Security updates still open
+# at once (the cooldown applies to version updates only).
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
