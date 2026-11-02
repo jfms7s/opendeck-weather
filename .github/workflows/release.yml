@@ -36,19 +36,7 @@ jobs:
           targets: aarch64-apple-darwin
       - run: cargo build --release --locked --target aarch64-apple-darwin
       - name: Check it is a signed arm64 binary that starts
-        run: |
-          bin=target/aarch64-apple-darwin/release/opendeck-weather
-          file "$bin"
-          # macOS's file says "executable arm64", Linux's "arm64 executable".
-          file -b "$bin" | grep -Eq '^Mach-O 64-bit (arm64 executable|executable arm64)'
-          # Apple Silicon kills unsigned binaries; the linker's ad-hoc
-          # signature must survive `strip = true`.
-          codesign --verify --verbose "$bin"
-          # Without OpenDeck's arguments it stops at the first missing flag,
-          # which proves it got as far as main().
-          out=$("$bin" 2>&1 || true)
-          echo "$out"
-          echo "$out" | grep -q "missing CLI flag: -port"
+        run: scripts/check-binary.sh target/aarch64-apple-darwin/release/opendeck-weather --mach-o
       - name: Pack the binary (a tar keeps the executable bit; artifacts don't)
         run: tar -cf macos-bin.tar -C target/aarch64-apple-darwin/release opendeck-weather
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -103,12 +91,8 @@ jobs:
       - name: Start the aarch64 binary under qemu (it links and runs)
         run: |
           sudo apt-get install -y qemu-user
-          # Without OpenDeck's arguments it stops at the first missing flag,
-          # which proves it got as far as main().
-          out=$(qemu-aarch64 -L /usr/aarch64-linux-gnu \
-            target/aarch64-unknown-linux-gnu/release/opendeck-weather 2>&1 || true)
-          echo "$out"
-          echo "$out" | grep -q "missing CLI flag: -port"
+          scripts/check-binary.sh target/aarch64-unknown-linux-gnu/release/opendeck-weather \
+            --runner "qemu-aarch64 -L /usr/aarch64-linux-gnu"
       - name: Pack the Linux binaries (a tar keeps the executable bit; artifacts don't)
         run: |
           tar -cf linux-bins.tar -C target \
@@ -149,10 +133,7 @@ jobs:
         run: |
           mkdir -p target/aarch64-apple-darwin/release
           tar -xf macos-bin.tar -C target/aarch64-apple-darwin/release
-          bin=target/aarch64-apple-darwin/release/opendeck-weather
-          test -x "$bin"
-          # macOS's file says "executable arm64", Linux's "arm64 executable".
-          file -b "$bin" | grep -Eq '^Mach-O 64-bit (arm64 executable|executable arm64)'
+          scripts/check-binary.sh target/aarch64-apple-darwin/release/opendeck-weather --mach-o --static
       - name: Assemble the bundle (every target in the manifest's CodePaths)
         run: node build.mjs --all
       - name: Zip the bundle and checksum it

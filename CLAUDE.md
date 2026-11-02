@@ -15,6 +15,9 @@ cargo build --release --locked && node build.mjs    # bundle in dist/
 node --test tests/*.test.mjs         # the property inspector's script (Node only)
 ```
 
+`scripts/check-binary.sh` is what CI and the release use to check a built binary
+starts (and, on macOS, is a signed arm64 Mach-O).
+
 CI runs all of these, plus an aarch64 `cargo check`, an MSRV (`rust-version`) check
 and `cargo deny check advisories sources` (`deny.toml` allows crates from crates.io
 only). Always pass `--locked`. `.nvmrc` is CI's and the release's exact Node version;
