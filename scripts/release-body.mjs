@@ -43,8 +43,8 @@ const version = readFileSync("Cargo.toml", "utf8").match(/^version\s*=\s*"([^"]+
 if (!version) fail('could not find `version = "..."` in Cargo.toml');
 
 process.stdout.write(`<!-- Written by the Release workflow. Before publishing: run the checklist on
-Linux and on a Mac, tick what passed and mark the rest "fail" or "not run" with
-why, fill in the smoke log and run-on lines, delete the UNVERIFIED line, then
+Linux (and on a Mac when README "Releasing" step 4 says so), tick what passed
+and mark the rest "fail" or "not run" with why, fill in the smoke log and run-on lines, delete the UNVERIFIED line, then
 delete this comment. -->
 Verify that the bundle was built by this repository's release workflow with
 \`gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather --signer-workflow jfms7s/opendeck-weather/.github/workflows/release.yml\`.

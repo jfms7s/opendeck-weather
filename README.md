@@ -126,9 +126,9 @@ xattr -d com.apple.quarantine ~/Library/Application\ Support/opendeck/plugins/co
 
 ## Manual smoke-test checklist
 
-Run this in a live OpenDeck + Stream Deck session on Linux, and the Mac list on a Mac,
-before publishing a release. Record the result per item: pass, fail or **not run** (with
-why). Each release's draft notes start with this list, unticked, under an `UNVERIFIED`
+Run this in a live OpenDeck + Stream Deck session on Linux before publishing a release,
+and the Mac list on a Mac when the release needs a Mac run (Releasing, step 4). Record
+the result per item: pass, fail or **not run** (with why). Each release's draft notes start with this list, unticked, under an `UNVERIFIED`
 line: tick or annotate each item there, fill in the run details and delete the
 `UNVERIFIED` line before publishing. The full run (date, OpenDeck version, platform,
 Stream Deck model, per-item notes) goes in that release's smoke log,
@@ -181,8 +181,8 @@ repository), which the release notes link.
       (`sudo iptables -D OUTPUT -p tcp --dport 443 -d api.open-meteo.com,air-quality-api.open-meteo.com,geocoding-api.open-meteo.com -j DROP`):
       the keys recover within about a minute.
 
-On a Mac (Apple Silicon), additionally - with the draft release's bundle (Releasing,
-step 4):
+On a Mac (Apple Silicon), additionally - with the draft release's bundle, when the
+release needs a Mac run (Releasing, step 4):
 
 - [ ] The release bundle installs through OpenDeck and every action above renders.
 - [ ] `xattr -l` on the installed `opendeck-weather-aarch64-apple-darwin` shows no
@@ -230,10 +230,17 @@ run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
    build-provenance attestation. The draft's notes start with the smoke-test checklist
    above, unticked, under an `UNVERIFIED` line (`scripts/release-body.mjs`), followed by
    the generated change list.
-4. Install the draft's bundle through OpenDeck on Linux and on a Mac, run the checklist,
+4. Install the draft's bundle through OpenDeck on Linux, run the checklist,
    write the release's smoke log, tick or annotate every item in the draft's notes, link
    the log and delete the `UNVERIFIED` line. The release notes are the record; a draft
-   whose notes still say `UNVERIFIED` is not published.
+   whose notes still say `UNVERIFIED` is not published. **When a Mac run is needed:**
+   always, until one published release has passed the "On a Mac" items on a real Mac;
+   after that, only when the release touches platform-relevant parts since the last
+   release that had a Mac run: dependencies (above all TLS: `reqwest`, `rustls*`,
+   `security-framework`), `assets/manifest.json`, `build.mjs` or the bundle layout, or
+   filesystem paths. Otherwise run the Linux checklist only, mark the "On a Mac" items
+   not run and write "Mac: not re-tested (no platform-relevant change since vX.Y.Z)" on
+   the notes' macOS run-on line.
 5. Publish with `scripts/publish-release.sh vX.Y.Z`, which refuses while the notes say
    `UNVERIFIED` or while GitHub's immutable releases setting is off. Ansible installs the
    latest *published* release, so publishing is what deploys it. Published releases are
