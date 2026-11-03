@@ -504,6 +504,16 @@ pub fn air_quality(aq: &AirQuality, scale: AqiScale, page: AirQualityPage, stale
         AirQualityPage::Pm10 => pollutant(aq.pm10, "PM10"),
         AirQualityPage::Ozone => pollutant(aq.ozone, "Ozone"),
         AirQualityPage::NitrogenDioxide => pollutant(aq.nitrogen_dioxide, "NO₂"),
+        // Raw grains/m³, uncoloured: pollen has no standard category scale.
+        AirQualityPage::Pollen => match aq.pollen.dominant() {
+            Some((kind, v)) => Card::new(
+                glyph,
+                concentration(Some(v)),
+                format!("{} pollen", kind.name()),
+                "grains/m³",
+            ),
+            None => Card::new(glyph, "--", "Pollen", "No pollen data"),
+        },
     };
     card.marked_stale(stale)
 }
@@ -512,7 +522,7 @@ pub fn air_quality(aq: &AirQuality, scale: AqiScale, page: AirQualityPage, stale
 pub(crate) mod tests {
     use super::*;
     use crate::card::key_svg;
-    use crate::model::{Current, CurrentExtra, Day, Hour};
+    use crate::model::{Current, CurrentExtra, Day, Hour, Pollen};
     use chrono::NaiveDate;
 
     fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
@@ -1172,7 +1182,39 @@ pub(crate) mod tests {
             pm10: Some(10.9),
             ozone: Some(67.0),
             nitrogen_dioxide: None,
+            pollen: Pollen::default(),
         }
+    }
+
+    #[test]
+    fn the_pollen_page_names_the_highest_series() {
+        let mut a = aq();
+        a.pollen = Pollen {
+            grass: Some(120.4),
+            olive: Some(48.0),
+            ..Pollen::default()
+        };
+        let c = air_quality(&a, AqiScale::Us, AirQualityPage::Pollen, false);
+        assert_eq!(
+            (c.value.as_str(), c.label.as_str(), c.detail.as_str()),
+            ("120", "Grass pollen", "grains/m³")
+        );
+        assert_eq!(c.glyph, Glyph::Ring(palette::AQI_GOOD));
+        assert_eq!(c.accent, None);
+        let key = key_svg(&c);
+        assert!(
+            key.contains(">120<") && key.contains(">Grass pollen<"),
+            "{key}"
+        );
+    }
+
+    #[test]
+    fn the_pollen_page_says_so_when_there_is_no_pollen_data() {
+        let c = air_quality(&aq(), AqiScale::Us, AirQualityPage::Pollen, false);
+        assert_eq!(
+            (c.value.as_str(), c.label.as_str(), c.detail.as_str()),
+            ("--", "Pollen", "No pollen data")
+        );
     }
 
     #[test]

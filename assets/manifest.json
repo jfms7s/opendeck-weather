@@ -52,7 +52,7 @@
 			"UUID": "com.jfms7s.weather.airquality",
 			"Name": "Air Quality",
 			"Icon": "icons/airquality",
-			"Tooltip": "Current air quality index for your location. Press to page through PM2.5, PM10, ozone and NO2",
+			"Tooltip": "Current air quality index for your location. Press to page through PM2.5, PM10, ozone, NO2 and pollen",
 			"Controllers": ["Keypad", "Encoder"],
 			"PropertyInspectorPath": "propertyInspector/index.html",
 			"States": [{ "Image": "icons/airquality" }],

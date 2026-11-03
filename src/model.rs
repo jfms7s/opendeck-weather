@@ -213,6 +213,64 @@ pub struct AirQuality {
     pub pm10: Option<f64>,
     pub ozone: Option<f64>,
     pub nitrogen_dioxide: Option<f64>,
+    pub pollen: Pollen,
+}
+
+/// Open-Meteo's six European pollen series, grains/m³. Europe only (CAMS),
+/// and only in season: elsewhere, or out of season, each is `None`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Pollen {
+    pub alder: Option<f64>,
+    pub birch: Option<f64>,
+    pub grass: Option<f64>,
+    pub mugwort: Option<f64>,
+    pub olive: Option<f64>,
+    pub ragweed: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PollenKind {
+    Alder,
+    Birch,
+    Grass,
+    Mugwort,
+    Olive,
+    Ragweed,
+}
+
+impl PollenKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            PollenKind::Alder => "Alder",
+            PollenKind::Birch => "Birch",
+            PollenKind::Grass => "Grass",
+            PollenKind::Mugwort => "Mugwort",
+            PollenKind::Olive => "Olive",
+            PollenKind::Ragweed => "Ragweed",
+        }
+    }
+}
+
+impl Pollen {
+    /// The series with the highest concentration, `None` when every series
+    /// is missing. A tie goes to the first in alphabetical order, so the
+    /// page never flickers between two equal series.
+    pub fn dominant(&self) -> Option<(PollenKind, f64)> {
+        [
+            (PollenKind::Alder, self.alder),
+            (PollenKind::Birch, self.birch),
+            (PollenKind::Grass, self.grass),
+            (PollenKind::Mugwort, self.mugwort),
+            (PollenKind::Olive, self.olive),
+            (PollenKind::Ragweed, self.ragweed),
+        ]
+        .into_iter()
+        .filter_map(|(kind, v)| v.filter(|v| v.is_finite()).map(|v| (kind, v)))
+        .fold(None, |best, (kind, v)| match best {
+            Some((_, b)) if b >= v => best,
+            _ => Some((kind, v)),
+        })
+    }
 }
 
 /// A geocoding match, as shown in the property inspector's result list.
@@ -227,6 +285,39 @@ pub struct Place {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_highest_pollen_series_wins() {
+        let p = Pollen {
+            alder: Some(3.0),
+            grass: Some(120.0),
+            olive: Some(48.0),
+            ..Pollen::default()
+        };
+        assert_eq!(p.dominant(), Some((PollenKind::Grass, 120.0)));
+    }
+
+    #[test]
+    fn a_pollen_tie_goes_to_the_first_series_in_alphabetical_order() {
+        let p = Pollen {
+            birch: Some(10.0),
+            olive: Some(10.0),
+            alder: Some(2.0),
+            ..Pollen::default()
+        };
+        assert_eq!(p.dominant(), Some((PollenKind::Birch, 10.0)));
+    }
+
+    #[test]
+    fn no_pollen_series_means_no_dominant_one_but_zero_still_counts() {
+        assert_eq!(Pollen::default().dominant(), None);
+        let zero = Pollen {
+            ragweed: Some(0.0),
+            ..Pollen::default()
+        };
+        assert_eq!(zero.dominant(), Some((PollenKind::Ragweed, 0.0)));
+    }
+
     #[test]
     fn an_unreadable_setting_is_logged_without_its_value() {
         let json = serde_json::json!({"location": {"name": "Lisbon",

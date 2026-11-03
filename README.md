@@ -53,7 +53,10 @@ One day of the 7-day forecast: high/low, condition, and chance of rain.
 The current air quality index, colored by category, on the **US AQI** or **European
 AQI** scale (your choice).
 
-- **Key** - press to page through PM2.5, PM10, ozone and NO₂ (µg/m³).
+- **Key** - press to page through PM2.5, PM10, ozone and NO₂ (µg/m³), then pollen: the
+  highest of alder, birch, grass, mugwort, olive and ragweed, with its name (grains/m³).
+  Pollen data covers Europe only, in season; elsewhere the page shows `--` and "No
+  pollen data".
 - **Dial** - rotate to page through them. Press or tap to jump back to the index.
 
 Any scrolled, paged or details screen returns to its resting screen 15 seconds after
@@ -167,7 +170,9 @@ repository), which the release notes link.
       show that place; "Use the default instead" on another switches it to the default.
 - [ ] On a dial, pressing Forecast shows `↑HH:MM ↓HH:MM` sunrise/sunset.
 - [ ] Air Quality shows a number colored by category. Presses page through PM2.5 → PM10
-      → Ozone → NO₂ → index. Switching Index to European changes the number and category.
+      → Ozone → NO₂ → Pollen → index. For a European location in season the pollen page
+      names a series (e.g. "Grass pollen"); elsewhere it shows `--` and "No pollen data".
+      Switching Index to European changes the number and category.
 - [ ] With the network down (e.g. `nmcli networking off`), keys keep showing their last
       data. A key given a new, never-fetched location shows "No data". After the network
       comes back, the keys recover within about a minute.
