@@ -18,7 +18,7 @@
 			"UUID": "com.jfms7s.weather.current",
 			"Name": "Weather",
 			"Icon": "icons/weather",
-			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like, again for wind, UV, pressure and sunset; on a dial, rotate to scroll the hourly forecast, press and rotate for the days, hold the strip to refresh",
+			"Tooltip": "Current conditions at your location. Press for today's high/low and feels-like, again for wind, UV, pressure and sunset; on a dial, a third press shows a 12-hour rain chart, rotate to scroll the hourly forecast, press and rotate for the days, hold the strip to refresh",
 			"Controllers": ["Keypad", "Encoder"],
 			"PropertyInspectorPath": "propertyInspector/index.html",
 			"States": [{ "Image": "icons/weather" }],
@@ -26,8 +26,8 @@
 				"layout": "layouts/card.json",
 				"TriggerDescription": {
 					"Rotate": "Scroll hours (press and turn: days)",
-					"Push": "Details",
-					"Touch": "Details (hold: refresh now)"
+					"Push": "Details, then the 12-hour chart",
+					"Touch": "Details, then the 12-hour chart (hold: refresh now)"
 				}
 			}
 		},

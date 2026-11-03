@@ -37,8 +37,11 @@ hour, or rain all 12 hours), the card shows the location name and condition as b
   screen: high/low, feels-like, wind and humidity. Press or tap again for the second
   page: the UV index, wind direction, speed and gusts, sea-level pressure (hPa, or inHg
   with Imperial units) and the next sunrise or sunset (`Sunset 2h10` within 12 hours,
-  `Sunset 19:28` beyond). A third press goes back. A value the forecast doesn't give
-  shows `--`. Releasing the dial after a press and turn doesn't open the details.
+  `Sunset 19:28` beyond). A third press shows the next 12 hours as a chart: the current
+  icon and temperature on the left, and one bar per hour from the current one (marked
+  `Now`), its height the chance of rain and its colour the temperature (blue cold to
+  red hot); an hour the forecast gives no chance for is a dashed outline, never an
+  empty bar. A fourth press goes back. A value the forecast doesn't give shows `--`. Releasing the dial after a press and turn doesn't open the details.
 
 ### Forecast
 
@@ -179,7 +182,10 @@ repository), which the release notes link.
 - [ ] On a dial, rotating Weather clockwise steps through the hours (the label shows the
       hour, e.g. `16:00`). It stops at +24h, and rotating back stops at "now". Pressing
       shows the details screen; pressing again shows the second page with pressure and
-      `Sunset ...` / `Sunrise ...` on its last line.
+      `Sunset ...` / `Sunrise ...` on its last line; pressing again switches the strip to
+      the 12-hour chart (icon and temperature left, 12 coloured bars right, `Now` under
+      the first, legible, nothing left over from the card layout), and a fourth press
+      brings the normal card back. A Weather key's presses never show the chart.
 - [ ] On a dial, pressing and turning Weather steps through the days (tomorrow's
       high/low, as on a Forecast dial), stops at 6 days ahead, and back at "now";
       releasing the dial afterwards does not open the details screen.

@@ -9,7 +9,8 @@
 //!   place of the location name. Rotate to scroll the hourly forecast (up to
 //!   24h ahead), press and rotate to scroll the days (up to 6 ahead), press
 //!   or tap the strip for the two details pages (the second adds pressure
-//!   and the next sunrise or sunset), hold the strip to refresh now.
+//!   and the next sunrise or sunset) and then a 12-hour rain chart (its own
+//!   strip layout, `layouts/timeline.json`), hold the strip to refresh now.
 
 use super::Behavior;
 use crate::card::Card;
@@ -42,7 +43,7 @@ impl Behavior for Weather {
     }
 
     fn dial_press(view: WeatherView) -> WeatherView {
-        view.next_details()
+        view.next_dial_page()
     }
 
     async fn refresh(
@@ -96,8 +97,18 @@ mod tests {
             WeatherView::MoreDetails
         );
         assert_eq!(
-            Weather::dial_press(WeatherView::MoreDetails),
+            Weather::key_press(WeatherView::MoreDetails),
             WeatherView::Now
+        );
+        // A dial has one more page, the timeline, then back to now.
+        assert_eq!(
+            Weather::dial_press(WeatherView::MoreDetails),
+            WeatherView::Timeline
+        );
+        assert_eq!(Weather::dial_press(WeatherView::Timeline), WeatherView::Now);
+        assert_eq!(
+            Weather::dial_rotate(WeatherView::Timeline, 2),
+            WeatherView::Hour(2)
         );
     }
 

@@ -1,6 +1,7 @@
 //! What one action instance shows, independent of the surface it's on.
 //! Every action builds a `Card`; `key_image` draws it on a keypad tile and
-//! `feedback` sends it to a dial's touch strip (`assets/layouts/card.json`).
+//! `feedback` sends it to a dial's touch strip (`assets/layouts/card.json`,
+//! or `timeline.json` for a card with a chart - see `Layout`).
 //!
 //! The two surfaces don't have the same room: a dial shows the value plus
 //! two lines (`label`, `detail`), a key the value plus one. A key draws
@@ -46,6 +47,27 @@ pub struct Card {
     /// The highest IPMA warning active at the location (Portugal only): a
     /// small triangle in its colour, top-left, on both surfaces.
     pub warning: Option<Level>,
+    /// A chart for the dial's timeline layout (a standalone SVG document,
+    /// `chart::timeline`). Keys never show one.
+    pub timeline: Option<String>,
+}
+
+/// The touch-strip layouts a dial can show. A dial starts on the
+/// manifest's (`Card`); switching needs a `setFeedbackLayout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    Card,
+    Timeline,
+}
+
+impl Layout {
+    /// The path `setFeedbackLayout` takes, relative to the bundle.
+    pub fn path(self) -> &'static str {
+        match self {
+            Layout::Card => "layouts/card.json",
+            Layout::Timeline => "layouts/timeline.json",
+        }
+    }
 }
 
 impl Card {
@@ -64,6 +86,7 @@ impl Card {
             key_label: None,
             stale: false,
             warning: None,
+            timeline: None,
         }
     }
 
@@ -84,6 +107,22 @@ impl Card {
 
     pub fn with_warning(self, warning: Option<Level>) -> Self {
         Card { warning, ..self }
+    }
+
+    pub fn with_timeline(self, chart: String) -> Self {
+        Card {
+            timeline: Some(chart),
+            ..self
+        }
+    }
+
+    /// The layout a dial needs for this card.
+    pub fn layout(&self) -> Layout {
+        if self.timeline.is_some() {
+            Layout::Timeline
+        } else {
+            Layout::Card
+        }
     }
 
     /// The one text line a key has room for under the value.
@@ -164,14 +203,26 @@ pub fn key_image(card: &Card) -> String {
     format!("data:image/svg+xml;base64,{encoded}")
 }
 
-/// `setFeedback` payload for `assets/layouts/card.json`.
+/// `setFeedback` payload for the card's `layout()`: `card.json`, or
+/// `timeline.json` (icon, value and label on the left, the chart on the
+/// right, no detail line).
 pub fn feedback(card: &Card) -> Value {
-    json!({
-        "icon": glyphs::document(&card.glyph_body()),
-        "value": { "value": card.value, "color": card.value_color() },
-        "label": card.label,
-        "detail": card.detail,
-    })
+    let icon = glyphs::document(&card.glyph_body());
+    let value = json!({ "value": card.value, "color": card.value_color() });
+    match &card.timeline {
+        None => json!({
+            "icon": icon,
+            "value": value,
+            "label": card.label,
+            "detail": card.detail,
+        }),
+        Some(chart) => json!({
+            "icon": icon,
+            "value": value,
+            "label": card.label,
+            "chart": chart,
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -280,38 +331,97 @@ mod tests {
         }
     }
 
+    fn shipped_layout(layout: Layout) -> Value {
+        let json = match layout {
+            Layout::Card => include_str!("../assets/layouts/card.json"),
+            Layout::Timeline => include_str!("../assets/layouts/timeline.json"),
+        };
+        serde_json::from_str(json).unwrap()
+    }
+
+    fn timeline_card() -> Card {
+        card().with_timeline(crate::chart::timeline(&[], crate::model::Units::Metric))
+    }
+
     #[test]
     fn feedback_keys_match_the_shipped_layout() {
-        let layout: Value =
-            serde_json::from_str(include_str!("../assets/layouts/card.json")).unwrap();
-        let keys: Vec<&str> = layout["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|i| i["key"].as_str().unwrap())
-            .collect();
-        let fb = feedback(&card());
-        for k in fb.as_object().unwrap().keys() {
-            assert!(keys.contains(&k.as_str()), "layout has no item keyed {k}");
+        for c in [card(), timeline_card()] {
+            let layout = shipped_layout(c.layout());
+            let items = layout["items"].as_array().unwrap();
+            let keys: Vec<&str> = items.iter().map(|i| i["key"].as_str().unwrap()).collect();
+            let fb = feedback(&c);
+            let sent: Vec<&String> = fb.as_object().unwrap().keys().collect();
+            for k in &sent {
+                assert!(
+                    keys.contains(&k.as_str()),
+                    "{:?} has no item keyed {k}",
+                    c.layout()
+                );
+            }
+            // Every item is filled, so nothing from another layout lingers.
+            for k in &keys {
+                assert!(
+                    sent.iter().any(|s| s == k),
+                    "{:?}: {k} never sent",
+                    c.layout()
+                );
+            }
         }
     }
 
     #[test]
-    fn the_shipped_layout_uses_the_same_text_colors_as_keys() {
-        let layout: Value =
-            serde_json::from_str(include_str!("../assets/layouts/card.json")).unwrap();
-        let color = |key: &str| {
-            layout["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|i| i["key"] == key)
-                .unwrap()["color"]
-                .clone()
-        };
-        assert_eq!(color("value"), palette::TEXT);
-        assert_eq!(color("label"), palette::MUTED_TEXT);
-        assert_eq!(color("detail"), palette::MUTED_TEXT);
+    fn the_layouts_paths_are_shipped_and_the_manifest_starts_on_the_card() {
+        for layout in [Layout::Card, Layout::Timeline] {
+            let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets")
+                .join(layout.path());
+            assert!(file.is_file(), "{}", file.display());
+            assert!(shipped_layout(layout)["id"].as_str().is_some());
+        }
+        let manifest: Value =
+            serde_json::from_str(include_str!("../assets/manifest.json")).unwrap();
+        for action in manifest["Actions"].as_array().unwrap() {
+            assert_eq!(action["Encoder"]["layout"], Layout::Card.path());
+        }
+    }
+
+    #[test]
+    fn the_shipped_layouts_use_the_same_text_colors_as_keys() {
+        for layout in [Layout::Card, Layout::Timeline] {
+            let shipped = shipped_layout(layout);
+            let color = |key: &str| {
+                shipped["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|i| i["key"] == key)
+                    .map(|i| i["color"].clone())
+            };
+            assert_eq!(
+                color("value"),
+                Some(Value::from(palette::TEXT)),
+                "{layout:?}"
+            );
+            assert_eq!(
+                color("label"),
+                Some(Value::from(palette::MUTED_TEXT)),
+                "{layout:?}"
+            );
+            if layout == Layout::Card {
+                assert_eq!(color("detail"), Some(Value::from(palette::MUTED_TEXT)));
+            }
+        }
+    }
+
+    #[test]
+    fn a_timeline_card_sends_its_chart_and_draws_a_plain_key() {
+        let c = timeline_card();
+        assert_eq!(c.layout(), Layout::Timeline);
+        assert_eq!(card().layout(), Layout::Card);
+        let fb = feedback(&c);
+        assert_eq!(fb["chart"], Value::from(c.timeline.clone().unwrap()));
+        assert!(fb.get("detail").is_none());
+        assert_eq!(key_svg(&c), key_svg(&card()));
     }
 
     #[test]
