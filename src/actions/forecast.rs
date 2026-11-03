@@ -9,6 +9,7 @@
 
 use super::Behavior;
 use crate::card::Card;
+use crate::ipma;
 use crate::model::{Location, Settings};
 use crate::open_meteo::{FORECAST_DAYS, FetchError};
 use crate::services::Services;
@@ -53,6 +54,7 @@ impl Behavior for Forecast {
         settings: &Settings,
         view: ForecastView,
         utc_now: DateTime<Utc>,
+        _warning: Option<ipma::Active>,
     ) -> Result<Card, FetchError> {
         let f = services.forecast(location, settings.units).await?;
         let now = f.value.local_now(utc_now);

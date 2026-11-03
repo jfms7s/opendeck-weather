@@ -181,9 +181,10 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         self.fetch_unless_settled(key, fetch, true).await
     }
 
-    /// What `key` holds without fetching or waiting: the value (fresh, or
-    /// stale but still usable, as `Cached::stale` says), and whether a fetch
-    /// is due - past the TTL, outside the backoff, none in flight.
+    /// What `key` holds without fetching or waiting, and whether a fetch is
+    /// due (past the TTL, outside the backoff, none in flight). The value is
+    /// `stale` only when the last attempt failed - one merely past its TTL,
+    /// still to be refreshed, is not, as for callers of an in-flight `get`.
     pub fn peek(&self, key: &K) -> (Option<Cached<V>>, bool) {
         let cell = self.slot(key);
         let state = cell.state();
@@ -192,7 +193,8 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
             Some(answer) => (answer.ok(), false),
             None => {
                 let in_flight = cell.fetching.try_lock().is_err();
-                (self.usable(&state, now, true), !in_flight)
+                let stale = state.last_error.is_some();
+                (self.usable(&state, now, stale), !in_flight)
             }
         }
     }
@@ -325,14 +327,14 @@ mod tests {
         get(&cache, &calls, Ok(1)).await.unwrap();
         // Fresh: served, nothing due.
         assert_eq!(peek(&cache), (Some((1, false)), false));
-        // Past the TTL: still served (marked stale), a fetch is due.
+        // Past the TTL: still served, a fetch is due.
         tokio::time::advance(POLICY.ttl).await;
-        assert_eq!(peek(&cache), (Some((1, true)), true));
+        assert_eq!(peek(&cache), (Some((1, false)), true));
         // A failure: inside the backoff the old value, nothing due.
         get(&cache, &calls, Err("down".into())).await.unwrap();
         assert_eq!(peek(&cache), (Some((1, true)), false));
         tokio::time::advance(POLICY.retry_after).await;
-        assert!(peek(&cache).1);
+        assert_eq!(peek(&cache), (Some((1, true)), true));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 

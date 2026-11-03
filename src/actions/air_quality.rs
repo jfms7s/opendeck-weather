@@ -9,6 +9,7 @@
 
 use super::Behavior;
 use crate::card::Card;
+use crate::ipma;
 use crate::model::{Location, Settings};
 use crate::open_meteo::FetchError;
 use crate::services::Services;
@@ -50,6 +51,7 @@ impl Behavior for AirQuality {
         settings: &Settings,
         page: AirQualityPage,
         _utc_now: DateTime<Utc>,
+        _warning: Option<ipma::Active>,
     ) -> Result<Card, FetchError> {
         let aq = services.air_quality(location).await?;
         Ok(views::air_quality(

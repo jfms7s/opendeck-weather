@@ -13,6 +13,7 @@
 
 use super::Behavior;
 use crate::card::Card;
+use crate::ipma;
 use crate::model::{Location, Settings};
 use crate::open_meteo::FetchError;
 use crate::services::Services;
@@ -61,6 +62,7 @@ impl Behavior for Weather {
         settings: &Settings,
         view: WeatherView,
         utc_now: DateTime<Utc>,
+        warning: Option<ipma::Active>,
     ) -> Result<Card, FetchError> {
         let f = services.forecast(location, settings.units).await?;
         let now = f.value.local_now(utc_now);
@@ -71,7 +73,7 @@ impl Behavior for Weather {
             view,
             now,
             f.stale,
-            services.warning(location, utc_now).as_ref(),
+            warning.as_ref(),
         ))
     }
 }

@@ -68,12 +68,15 @@ For a location in Portugal (mainland, Madeira and the Azores), every card of eve
 action shows a small warning triangle in its top-left corner while
 [IPMA](https://www.ipma.pt) has a yellow, orange or red warning active for that
 location's district or island group, in the colour of the highest one. The area is
-picked automatically: the district of the nearest place in IPMA's own list (Madeira
-maps to its south coast or Porto Santo areas). Every type counts: rain, wind, fog,
+picked automatically: the district of the nearest place in IPMA's own list, so a town
+near a district border can get its neighbour's warnings (Covilhã gets Guarda's, for
+example), and Madeira maps to its south coast or Porto Santo areas (IPMA's north-coast
+and mountain areas have no place in that list). Every type counts: rain, wind, fog,
 snow, heat, cold, thunderstorms and rough seas. On the Weather details screen (first
 press), the warning replaces "feels like" while it lasts: `Rain until 18:00`, or
-`Wind until Thu 06:00` when it ends on another day. Elsewhere, or while IPMA can't be
-reached, the cards look exactly as without it.
+`Wind until Thu 06:00` when it ends on another day. Elsewhere, or once a request to
+IPMA has failed (an older feed could show a warning IPMA has since lifted), the cards
+look exactly as without it.
 
 Any scrolled, paged or details screen returns to its resting screen 15 seconds after
 your last press or turn.

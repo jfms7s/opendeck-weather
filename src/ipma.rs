@@ -97,6 +97,7 @@ pub struct Active {
     pub end: DateTime<Utc>,
 }
 
+#[cfg_attr(test, allow(dead_code))] // tests never reach the network
 pub async fn fetch(http: &OpenMeteo) -> Result<Vec<Warning>, FetchError> {
     http.get(Url::parse(WARNINGS_URL).expect("static URL"))
         .await
@@ -117,18 +118,32 @@ fn time(entry: &Value, field: &str) -> Option<DateTime<Utc>> {
 pub fn parse_warnings(body: &str) -> Result<Vec<Warning>, FetchError> {
     let entries: Vec<Value> =
         serde_json::from_str(body).map_err(|e| FetchError::Parse(format!("IPMA warnings: {e}")))?;
-    Ok(entries
+    let not_green = entries
         .iter()
-        .filter_map(|entry| {
-            Some(Warning {
-                level: Level::parse(entry.get("awarenessLevelID")?.as_str()?)?,
-                kind: Kind::parse(entry.get("awarenessTypeName")?.as_str()?)?,
-                area: entry.get("idAreaAviso")?.as_str()?.to_string(),
-                start: time(entry, "startTime")?,
-                end: time(entry, "endTime")?,
-            })
-        })
-        .collect())
+        .filter(|e| e.get("awarenessLevelID").and_then(Value::as_str) != Some("green"));
+    let mut skipped = 0;
+    let mut warnings = Vec::new();
+    for entry in not_green {
+        match warning(entry) {
+            Some(w) => warnings.push(w),
+            None => skipped += 1,
+        }
+    }
+    if skipped > 0 {
+        // A format change would otherwise hide every warning silently.
+        log::warn!("IPMA warnings: skipped {skipped} entries in an unknown format");
+    }
+    Ok(warnings)
+}
+
+fn warning(entry: &Value) -> Option<Warning> {
+    Some(Warning {
+        level: Level::parse(entry.get("awarenessLevelID")?.as_str()?)?,
+        kind: Kind::parse(entry.get("awarenessTypeName")?.as_str()?)?,
+        area: entry.get("idAreaAviso")?.as_str()?.to_string(),
+        start: time(entry, "startTime")?,
+        end: time(entry, "endTime")?,
+    })
 }
 
 /// The highest-level warning for `area` active at `now` (start inclusive,
