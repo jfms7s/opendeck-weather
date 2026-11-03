@@ -12,7 +12,7 @@ cargo fmt --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked                  # no internet needed
 cargo build --release --locked && node build.mjs    # bundle in dist/
-node --test tests/*.test.mjs         # the property inspector's script (Node only)
+node --test tests/*.test.mjs         # the property inspector's script and the draft notes (Node only)
 ```
 
 `scripts/check-binary.sh` is what CI and the release use to check a built binary

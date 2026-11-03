@@ -46,7 +46,10 @@ process.stdout.write(`<!-- Written by the Release workflow. Before publishing: r
 Linux and on a Mac, tick what passed and mark the rest "fail" or "not run" with
 why, fill in the smoke log and run-on lines, delete the UNVERIFIED line, then
 delete this comment. -->
-Verify the download with \`sha256sum -c SHA256SUMS\` (macOS: \`shasum -a 256 -c SHA256SUMS\`).
+Verify that the bundle was built by this repository's release workflow with
+\`gh attestation verify opendeck-weather.streamDeckPlugin --repo jfms7s/opendeck-weather --signer-workflow jfms7s/opendeck-weather/.github/workflows/release.yml\`.
+Optionally, \`sha256sum -c SHA256SUMS\` (macOS: \`shasum -a 256 -c SHA256SUMS\`) catches a
+damaged download; \`SHA256SUMS\` comes from this same page, so the attestation is the check that matters.
 
 ## Smoke test
 
