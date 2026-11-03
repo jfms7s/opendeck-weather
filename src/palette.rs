@@ -21,6 +21,11 @@ pub const UV_HIGH: &str = "#f97316";
 pub const UV_VERY_HIGH: &str = "#ef4444";
 pub const UV_EXTREME: &str = "#a855f7";
 
+/// IPMA warning levels (yellow, orange, red), for the warning badge.
+pub const WARNING_YELLOW: &str = "#facc15";
+pub const WARNING_ORANGE: &str = "#f97316";
+pub const WARNING_RED: &str = "#ef4444";
+
 /// Air-quality category colours, shared by the US and European scales
 /// (`views::aqi_category` maps each scale's bands onto them) and the Air
 /// Quality icon.

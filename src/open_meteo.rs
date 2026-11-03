@@ -46,6 +46,9 @@ pub enum FetchError {
     Parse(String),
 }
 
+/// The shared HTTPS client (`https_only`, no redirects, a timeout, a body
+/// cap), also used for IPMA's warnings (`ipma::fetch`). Cheap to clone.
+#[derive(Clone)]
 pub struct OpenMeteo {
     client: reqwest::Client,
 }
@@ -72,7 +75,7 @@ impl Default for OpenMeteo {
 }
 
 impl OpenMeteo {
-    async fn get(&self, url: Url) -> Result<String, FetchError> {
+    pub(crate) async fn get(&self, url: Url) -> Result<String, FetchError> {
         let mut response = self.client.get(url).send().await.map_err(http_error)?;
         let status = response.status();
         if !status.is_success() {

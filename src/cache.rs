@@ -16,6 +16,9 @@
 //! - `refresh` fetches even when the value is fresh (a "refresh now"
 //!   gesture), but keeps everything else: the backoff, the stale fallback,
 //!   and not waiting behind an in-flight fetch.
+//! - `peek` never fetches or waits: it answers with what a `get` could
+//!   serve now, and whether a `get` would fetch, so a caller can fetch in
+//!   the background (IPMA warnings, which must never delay a card).
 //! - A key nobody has used for longer than `stale_after` is dropped the
 //!   next time a new key arrives, so searched-and-abandoned places don't
 //!   stay resident for the life of the process.
@@ -178,6 +181,24 @@ impl<K: Eq + Hash + Clone, V, E: Clone + Display> Cache<K, V, E> {
         self.fetch_unless_settled(key, fetch, true).await
     }
 
+    /// What `key` holds without fetching or waiting, and whether a fetch is
+    /// due (past the TTL, outside the backoff, none in flight). The value is
+    /// `stale` only when the last attempt failed - one merely past its TTL,
+    /// still to be refreshed, is not, as for callers of an in-flight `get`.
+    pub fn peek(&self, key: &K) -> (Option<Cached<V>>, bool) {
+        let cell = self.slot(key);
+        let state = cell.state();
+        let now = Instant::now();
+        match self.settled(&state, now, false) {
+            Some(answer) => (answer.ok(), false),
+            None => {
+                let in_flight = cell.fetching.try_lock().is_err();
+                let stale = state.last_error.is_some();
+                (self.usable(&state, now, stale), !in_flight)
+            }
+        }
+    }
+
     async fn fetch_unless_settled<F, Fut>(
         &self,
         key: &K,
@@ -291,6 +312,52 @@ mod tests {
             })
             .await
             .map(|c| *c.value)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn peek_never_fetches_and_says_when_a_fetch_is_due() {
+        let cache = TestCache::new(POLICY);
+        let calls = AtomicU32::new(0);
+        let peek = |cache: &TestCache| {
+            let (v, due) = cache.peek(&"k");
+            (v.map(|c| (*c.value, c.stale)), due)
+        };
+        // Empty: nothing to show, a fetch is due.
+        assert_eq!(peek(&cache), (None, true));
+        get(&cache, &calls, Ok(1)).await.unwrap();
+        // Fresh: served, nothing due.
+        assert_eq!(peek(&cache), (Some((1, false)), false));
+        // Past the TTL: still served, a fetch is due.
+        tokio::time::advance(POLICY.ttl).await;
+        assert_eq!(peek(&cache), (Some((1, false)), true));
+        // A failure: inside the backoff the old value, nothing due.
+        get(&cache, &calls, Err("down".into())).await.unwrap();
+        assert_eq!(peek(&cache), (Some((1, true)), false));
+        tokio::time::advance(POLICY.retry_after).await;
+        assert_eq!(peek(&cache), (Some((1, true)), true));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn peek_reports_nothing_due_while_a_fetch_is_in_flight() {
+        let cache = Arc::new(TestCache::new(POLICY));
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let fetching = {
+            let cache = cache.clone();
+            tokio::spawn(async move {
+                cache
+                    .get(&"k", || async {
+                        released.await.ok();
+                        Ok(7)
+                    })
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        assert!(matches!(cache.peek(&"k"), (None, false)));
+        release.send(()).unwrap();
+        fetching.await.unwrap().unwrap();
+        assert!(matches!(cache.peek(&"k"), (Some(_), false)));
     }
 
     #[test]

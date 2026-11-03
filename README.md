@@ -6,6 +6,9 @@ plugin for Stream Deck. It has three actions - **Weather**, **Forecast** and **A
 Quality** - each assignable to a key or a dial. Data comes from
 [Open-Meteo](https://open-meteo.com): free, and no API key or account needed.
 
+For a location in Portugal, every card also carries IPMA's official weather warnings
+(see [Weather warnings](#weather-warnings-portugal)).
+
 Runs in OpenDeck on Linux (x86_64 and aarch64) and on macOS with Apple Silicon. The code
 has no platform-specific parts; Windows has never been tried, so the manifest doesn't
 offer it there.
@@ -59,6 +62,22 @@ AQI** scale (your choice).
   pollen data".
 - **Dial** - rotate to page through them. Press or tap to jump back to the index.
 
+### Weather warnings (Portugal)
+
+For a location in Portugal (mainland, Madeira and the Azores), every card of every
+action shows a small warning triangle in its top-left corner while
+[IPMA](https://www.ipma.pt) has a yellow, orange or red warning active for that
+location's district or island group, in the colour of the highest one. The area is
+picked automatically: the district of the nearest place in IPMA's own list, so a town
+near a district border can get its neighbour's warnings (Covilhã gets Guarda's, for
+example), and Madeira maps to its south coast or Porto Santo areas (IPMA's north-coast
+and mountain areas have no place in that list). Every type counts: rain, wind, fog,
+snow, heat, cold, thunderstorms and rough seas. On the Weather details screen (first
+press), the warning replaces "feels like" while it lasts: `Rain until 18:00`, or
+`Wind until Thu 06:00` when it ends on another day. Elsewhere, or once a request to
+IPMA has failed (an older feed could show a warning IPMA has since lifted), the cards
+look exactly as without it.
+
 Any scrolled, paged or details screen returns to its resting screen 15 seconds after
 your last press or turn.
 
@@ -96,6 +115,10 @@ Until a location (its own or the default) is set, an action shows a map pin and
 - Fetches never hold up the deck: a press or turn always responds at once, even while
   the network is slow or down.
 - Times (hours, sunrise, sunset) use the location's local time, not your machine's.
+- IPMA's warnings are one document for the whole country, fetched at most every 10
+  minutes and only while some action shows a place in Portugal. The request carries no
+  coordinates; the area is worked out on your machine. It never holds up a card: a
+  card drawn before the warnings arrive gets its badge at the next minute's refresh.
 
 ## Installing
 
@@ -173,6 +196,11 @@ repository), which the release notes link.
       → Ozone → NO₂ → Pollen → index. For a European location in season the pollen page
       names a series (e.g. "Grass pollen"); elsewhere it shows `--` and "No pollen data".
       Switching Index to European changes the number and category.
+- [ ] For a place in Portugal while IPMA (<https://www.ipma.pt/pt/otempo/prev-sam/>) has
+      a warning active for its district, every card shows a triangle in the warning's
+      colour, top-left, within about a minute, and the Weather details screen reads
+      `<Type> until HH:MM`; a place outside Portugal (and Portugal with no warning)
+      shows no triangle. (Not every run will have a live warning: say so if none.)
 - [ ] With the network down (e.g. `nmcli networking off`), keys keep showing their last
       data. A key given a new, never-fetched location shows "No data". After the network
       comes back, the keys recover within about a minute.
@@ -217,7 +245,7 @@ cp -r dist/com.jfms7s.weather.sdPlugin ~/.config/opendeck/plugins/
 `node build.mjs <triple>...` packages binaries built with `--target <triple>`, and
 `node build.mjs --all` every target in the manifest (what a release ships).
 
-The API response fixtures in `tests/fixtures/` are real Open-Meteo responses (see
+The API response fixtures in `tests/fixtures/` are real Open-Meteo and IPMA responses (see
 `tests/fixtures/README.md`). The parser tests run against them.
 
 The action-list icons (`assets/icons/`) are drawn by the same code as the keys: their
@@ -258,6 +286,9 @@ run `cargo test -- --ignored write_icon_sources` and `scripts/render-icons.sh`.
 
 Weather data by [Open-Meteo.com](https://open-meteo.com/), licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+Weather warnings by [IPMA](https://www.ipma.pt/) (Instituto Português do Mar e da
+Atmosfera), from its [open data](https://api.ipma.pt/).
 
 ## License
 

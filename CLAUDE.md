@@ -29,9 +29,10 @@ reason = "…" }]` entry with the reason, never leave the job red.
 
 ## Layout
 
-`open_meteo` (HTTP + pure `parse_*`) -> `cache` (TTL / stale fallback / backoff) ->
-`services` (the one shared cache, default location) -> `views` (pure: data + view
-state + `now` -> `Card`) -> `card` (draws a `Card` on a key or a dial).
+`open_meteo` (HTTP + pure `parse_*`; `ipma` the same for Portugal's warnings) ->
+`cache` (TTL / stale fallback / backoff) -> `services` (the one shared cache, default
+location) -> `views` (pure: data + view state + `now` -> `Card`) -> `card` (draws a
+`Card` on a key or a dial).
 `view_state` holds each action's UI state and its rules; `tracker` the live
 instances; `scheduler` the single refresh/revert loop; `wake` the doorbell that
 gets it to look again; `actions/` the generic `CardAction<B>` host plus one small
@@ -49,8 +50,10 @@ Adding an action: see the checklist in the design note (vault,
   field): openaction would otherwise replace the whole settings object - and the
   user's location - with the default. `tests/fixtures/settings-v0.1.json` must keep
   loading.
-- **Open-Meteo's CC BY 4.0 attribution** stays in the README and the property
-  inspector.
+- **Open-Meteo's CC BY 4.0 attribution** and **IPMA's source line** stay in the
+  README and the property inspector (a contract test checks both).
+- **IPMA warnings never sit on the render path**: `Services::warning` only peeks at
+  the cache and fetches in the background, so a hanging IPMA can't delay a card.
 - **Version lives in two places**: `Cargo.toml` and `assets/manifest.json`; bump both
   (`build.mjs` and the release workflow check).
 - **No log line or error string carries coordinates or search text**: map

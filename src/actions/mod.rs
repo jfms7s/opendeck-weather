@@ -16,6 +16,7 @@ pub mod forecast;
 pub mod weather;
 
 use crate::card::{self, Card};
+use crate::ipma;
 use crate::model::{GlobalSettings, Location, Place, Settings};
 use crate::open_meteo::{FetchError, MAX_QUERY_CHARS};
 use crate::scheduler::{Scheduled, VIEW_TIMEOUT};
@@ -67,13 +68,16 @@ pub trait Behavior: Send + Sync + 'static {
     }
 
     /// Fetches (through the shared cache) and builds the card for one
-    /// instance. `utc_now` is the only clock read.
+    /// instance. `utc_now` is the only clock read. `warning` is the IPMA
+    /// warning at the location, for an action that names it (the host
+    /// badges every card itself).
     async fn card(
         services: &Services,
         location: &Location,
         settings: &Settings,
         view: Self::View,
         utc_now: DateTime<Utc>,
+        warning: Option<ipma::Active>,
     ) -> Result<Card, FetchError>;
 }
 
@@ -125,7 +129,11 @@ impl<B: Behavior> CardAction<B> {
         let Some(location) = self.services.location_for(settings) else {
             return views::no_location();
         };
-        match B::card(&self.services, &location, settings, view, Utc::now()).await {
+        let utc_now = Utc::now();
+        // Every card for a place in Portugal carries IPMA's warning badge.
+        let warning = self.services.warning(&location, utc_now);
+        let card = match B::card(&self.services, &location, settings, view, utc_now, warning).await
+        {
             Ok(card) => card,
             Err(e) => {
                 // The cache logged the failed attempt once; a render that
@@ -133,7 +141,8 @@ impl<B: Behavior> CardAction<B> {
                 log::debug!("{} has no data: {e}", B::UUID);
                 views::no_data(&location.name)
             }
-        }
+        };
+        card.with_warning(warning.map(|w| w.level))
     }
 
     /// Builds the card for `id`'s current state and sends it, unless the
@@ -748,6 +757,18 @@ mod tests {
         assert!(html.contains(&format!("maxlength=\"{MAX_QUERY_CHARS}\"")));
     }
 
+    /// Both data sources are credited where users see them.
+    #[test]
+    fn the_readme_and_the_inspector_credit_both_data_sources() {
+        let html = include_str!("../../assets/propertyInspector/index.html");
+        let readme = include_str!("../../README.md");
+        assert!(html.contains("Weather data by Open-Meteo.com (CC BY 4.0)"));
+        assert!(html.contains("Weather warnings (Portugal) by IPMA (ipma.pt)"));
+        assert!(readme.contains("Weather data by [Open-Meteo.com](https://open-meteo.com/)"));
+        assert!(readme.contains("[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)"));
+        assert!(readme.contains("Weather warnings by [IPMA](https://www.ipma.pt/)"));
+    }
+
     /// Serde wire names of the settings enums, for the contract test above.
     mod erased {
         pub trait Named {
@@ -847,6 +868,7 @@ mod tests {
             _: &Settings,
             view: i32,
             _: DateTime<Utc>,
+            _: Option<ipma::Active>,
         ) -> Result<Card, FetchError> {
             if view == 100 {
                 GATE.notified().await;
@@ -1013,6 +1035,39 @@ mod tests {
             dial.take(),
             [("feedback", card::feedback(&echo_card(0)).to_string())]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cards_in_portugal_get_the_warning_badge_once_the_feed_arrives() {
+        use crate::ipma::{Kind, Level, Warning};
+        use chrono::TimeDelta;
+        let now = Utc::now();
+        let feed = vec![Warning {
+            area: "LSB".into(),
+            kind: Kind::Wind,
+            level: Level::Red,
+            start: now - TimeDelta::hours(1),
+            end: now + TimeDelta::hours(6),
+        }];
+        let services = Services::with_warnings(Arc::new(move || {
+            let feed = feed.clone();
+            Box::pin(async move { Ok(feed) })
+        }));
+        let action = CardAction::<Echo>::new(Arc::new(services), Arc::default());
+        // Not waited for: the first card has no badge.
+        assert_eq!(action.build_card(&located(), 0).await.warning, None);
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            action.build_card(&located(), 0).await,
+            echo_card(0).with_warning(Some(Level::Red))
+        );
+        // Outside Portugal, none.
+        let mut madrid = located();
+        madrid.location.as_mut().unwrap().latitude = 40.4;
+        madrid.location.as_mut().unwrap().longitude = -3.7;
+        assert_eq!(action.build_card(&madrid, 0).await, echo_card(0));
     }
 
     #[tokio::test]
