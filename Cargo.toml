@@ -3,7 +3,8 @@ name = "opendeck-weather"
 version = "0.6.0"
 edition = "2024"
 # Let-chains (stable since 1.88), and several dependencies need 1.88 too.
-# CI checks the build on exactly this version.
+# Not checked in CI: binaries are built with the pinned toolchain; raise this
+# when a dependency needs it.
 rust-version = "1.88"
 license = "MIT"
 description = "OpenDeck plugin: current weather, daily forecast and air quality on Stream Deck keys and dials"
