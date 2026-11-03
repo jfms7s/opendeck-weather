@@ -1,5 +1,6 @@
 //! **Air Quality**: the current air quality index (US or European scale),
-//! colored by category, plus PM2.5, PM10, ozone and NO₂ pages.
+//! colored by category, plus PM2.5, PM10, ozone and NO₂ pages and a pollen
+//! page (the highest of the six European pollen series, grains/m³).
 //!
 //! - Key: shows the index. Press to page through the pollutants; it
 //!   returns to the index on its own.
@@ -68,10 +69,7 @@ mod tests {
     fn presses_page_forward_and_a_dial_press_returns_to_the_index() {
         let p = AirQuality::key_press(AirQualityPage::Index);
         assert_eq!(p, AirQualityPage::Pm25);
-        assert_eq!(
-            AirQuality::dial_rotate(p, -2),
-            AirQualityPage::NitrogenDioxide
-        );
+        assert_eq!(AirQuality::dial_rotate(p, -2), AirQualityPage::Pollen);
         assert_eq!(AirQuality::dial_press(p), AirQualityPage::Index);
     }
 }

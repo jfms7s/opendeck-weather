@@ -6,7 +6,7 @@
 //! captured responses in `tests/fixtures/`.
 
 use crate::model::{
-    AirQuality, Current, CurrentExtra, Day, Forecast, Hour, Location, Place, Units,
+    AirQuality, Current, CurrentExtra, Day, Forecast, Hour, Location, Place, Pollen, Units,
 };
 use chrono::{NaiveDate, NaiveDateTime};
 use reqwest::Url;
@@ -182,7 +182,9 @@ fn air_quality_url(location: &Location) -> Url {
     params.extend([
         (
             "current",
-            "us_aqi,european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide".into(),
+            "us_aqi,european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide,\
+             alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen"
+                .into(),
         ),
         ("timezone", "auto".into()),
     ]);
@@ -374,6 +376,12 @@ struct RawAirQuality {
     pm10: Option<f64>,
     ozone: Option<f64>,
     nitrogen_dioxide: Option<f64>,
+    alder_pollen: Option<f64>,
+    birch_pollen: Option<f64>,
+    grass_pollen: Option<f64>,
+    mugwort_pollen: Option<f64>,
+    olive_pollen: Option<f64>,
+    ragweed_pollen: Option<f64>,
 }
 
 pub fn parse_air_quality(json: &str) -> Result<AirQuality, FetchError> {
@@ -387,6 +395,14 @@ pub fn parse_air_quality(json: &str) -> Result<AirQuality, FetchError> {
         pm10: c.pm10,
         ozone: c.ozone,
         nitrogen_dioxide: c.nitrogen_dioxide,
+        pollen: Pollen {
+            alder: c.alder_pollen,
+            birch: c.birch_pollen,
+            grass: c.grass_pollen,
+            mugwort: c.mugwort_pollen,
+            olive: c.olive_pollen,
+            ragweed: c.ragweed_pollen,
+        },
     })
 }
 
@@ -551,6 +567,61 @@ mod tests {
         assert_eq!(aq.us_aqi, Some(43.0));
         assert_eq!(aq.european_aqi, Some(24.0));
         assert_eq!(aq.pm2_5, Some(6.5));
+    }
+
+    #[test]
+    fn the_captured_air_quality_response_has_no_pollen() {
+        let aq = parse_air_quality(AIR_QUALITY).unwrap();
+        assert_eq!(aq.pollen, Pollen::default());
+    }
+
+    #[test]
+    fn parses_pollen_and_treats_null_as_missing() {
+        let aq = parse_air_quality(
+            r#"{"current":{"us_aqi":40,"alder_pollen":0.0,"birch_pollen":null,
+                "grass_pollen":120.4,"mugwort_pollen":1.5,"olive_pollen":48.0,
+                "ragweed_pollen":null}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            aq.pollen,
+            Pollen {
+                alder: Some(0.0),
+                birch: None,
+                grass: Some(120.4),
+                mugwort: Some(1.5),
+                olive: Some(48.0),
+                ragweed: None,
+            }
+        );
+    }
+
+    #[test]
+    fn air_quality_url_requests_the_six_pollen_series() {
+        let url = air_quality_url(&lisbon());
+        let current = url
+            .query_pairs()
+            .find(|(k, _)| k == "current")
+            .unwrap()
+            .1
+            .into_owned();
+        let fields: Vec<&str> = current.split(',').collect();
+        for field in [
+            "us_aqi",
+            "european_aqi",
+            "pm2_5",
+            "pm10",
+            "ozone",
+            "nitrogen_dioxide",
+            "alder_pollen",
+            "birch_pollen",
+            "grass_pollen",
+            "mugwort_pollen",
+            "olive_pollen",
+            "ragweed_pollen",
+        ] {
+            assert!(fields.contains(&field), "{field} in {current}");
+        }
     }
 
     #[test]

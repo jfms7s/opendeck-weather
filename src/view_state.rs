@@ -91,7 +91,7 @@ impl ForecastView {
     }
 }
 
-/// Air Quality: the index, then one page per pollutant.
+/// Air Quality: the index, one page per pollutant, then the dominant pollen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AirQualityPage {
     #[default]
@@ -100,15 +100,17 @@ pub enum AirQualityPage {
     Pm10,
     Ozone,
     NitrogenDioxide,
+    Pollen,
 }
 
 impl AirQualityPage {
-    const ORDER: [AirQualityPage; 5] = [
+    const ORDER: [AirQualityPage; 6] = [
         AirQualityPage::Index,
         AirQualityPage::Pm25,
         AirQualityPage::Pm10,
         AirQualityPage::Ozone,
         AirQualityPage::NitrogenDioxide,
+        AirQualityPage::Pollen,
     ];
 
     /// Pages forward (or back, for negative `pages`), wrapping around.
@@ -190,15 +192,13 @@ mod tests {
 
     #[test]
     fn air_quality_paging_wraps_in_both_directions() {
-        assert_eq!(
-            AirQualityPage::Index.step(-1),
-            AirQualityPage::NitrogenDioxide
-        );
+        assert_eq!(AirQualityPage::Index.step(-1), AirQualityPage::Pollen);
         assert_eq!(
             AirQualityPage::NitrogenDioxide.step(1),
-            AirQualityPage::Index
+            AirQualityPage::Pollen
         );
+        assert_eq!(AirQualityPage::Pollen.step(1), AirQualityPage::Index);
         assert_eq!(AirQualityPage::Index.step(2), AirQualityPage::Pm10);
-        assert_eq!(AirQualityPage::Index.step(5), AirQualityPage::Index);
+        assert_eq!(AirQualityPage::Index.step(6), AirQualityPage::Index);
     }
 }
