@@ -9,6 +9,7 @@
 
 use crate::card::Card;
 use crate::glyphs::Glyph;
+use crate::ipma;
 use crate::model::{AirQuality, AqiScale, Current, Forecast, Hour, Units};
 use crate::palette;
 use crate::view_state::{AirQualityPage, ForecastView, WeatherView};
@@ -171,6 +172,7 @@ pub fn weather(
     view: WeatherView,
     now: NaiveDateTime,
     stale: bool,
+    warning: Option<&ipma::Active>,
 ) -> Card {
     let hour_now = current_hour(f, now);
     // A stale observation is hours old by now, so the forecast for the
@@ -180,6 +182,14 @@ pub fn weather(
     match view {
         WeatherView::Details => {
             if let Some(card) = weather_details(f, observed, hour_now.map(|(_, h)| h), units, now) {
+                // An official warning outranks "feels like" while it lasts.
+                let card = match warning {
+                    Some(w) => Card {
+                        label: warning_line(f, w, now),
+                        ..card
+                    },
+                    None => card,
+                };
                 return card.marked_stale(stale);
             }
         }
@@ -241,6 +251,18 @@ pub fn weather(
         card
     };
     card.marked_stale(stale)
+}
+
+/// `Rain until 18:00`, or `Wind until Thu 06:00` when the warning ends on
+/// another day than `now` (both in the location's local time).
+fn warning_line(f: &Forecast, w: &ipma::Active, now: NaiveDateTime) -> String {
+    let end = f.local_now(w.end);
+    let format = if end.date() == now.date() {
+        "%H:%M"
+    } else {
+        "%a %H:%M"
+    };
+    format!("{} until {}", w.kind.name(), end.format(format))
 }
 
 /// High/low, feels-like, wind and humidity. `observed` is the observation
@@ -608,7 +630,7 @@ pub(crate) mod tests {
     }
 
     fn lisbon(f: &Forecast, view: WeatherView, now: NaiveDateTime) -> Card {
-        weather(f, "Lisbon", Units::Metric, view, now, false)
+        weather(f, "Lisbon", Units::Metric, view, now, false, None)
     }
 
     fn day(f: &Forecast, base: u8, days: i32) -> Card {
@@ -677,6 +699,7 @@ pub(crate) mod tests {
             WeatherView::Now,
             now(),
             true,
+            None,
         );
         assert!(c.stale);
         assert_eq!(c.detail, "Rain at 16:00");
@@ -802,6 +825,7 @@ pub(crate) mod tests {
             WeatherView::Details,
             now(),
             false,
+            None,
         );
         assert_eq!(c.value, "28°/18°");
         assert_eq!(c.label, "Feels 20°");
@@ -811,6 +835,70 @@ pub(crate) mod tests {
             key.contains(">28°/18°<") && key.contains(">Feels 20°<"),
             "{key}"
         );
+    }
+
+    fn warned(kind: ipma::Kind, end_utc: (u32, u32)) -> ipma::Active {
+        ipma::Active {
+            kind,
+            level: ipma::Level::Orange,
+            end: at(end_utc.0, end_utc.1, 0).and_utc(),
+        }
+    }
+
+    #[test]
+    fn a_warning_takes_the_details_label_with_its_local_end() {
+        // `sample()` is UTC+1: 17:00 UTC ends at 18:00 local, today.
+        let w = warned(ipma::Kind::Rain, (25, 17));
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Details,
+            now(),
+            false,
+            Some(&w),
+        );
+        assert_eq!(c.label, "Rain until 18:00");
+        assert_eq!(c.value, "28°/18°");
+        assert_eq!(c.detail, "Wind 12 km/h · Hum 46%");
+        assert!(key_svg(&c).contains(">Rain until 18:00<"));
+        // Ending on another day names it.
+        let w = warned(ipma::Kind::RoughSea, (26, 5));
+        let c = weather(
+            &sample(),
+            "Lisbon",
+            Units::Metric,
+            WeatherView::Details,
+            now(),
+            false,
+            Some(&w),
+        );
+        assert_eq!(c.label, "Rough sea until Sat 06:00");
+    }
+
+    #[test]
+    fn a_warning_changes_no_other_screen() {
+        let w = warned(ipma::Kind::Wind, (25, 17));
+        for view in [
+            WeatherView::Now,
+            WeatherView::MoreDetails,
+            WeatherView::Hour(2),
+            WeatherView::Day(1),
+        ] {
+            assert_eq!(
+                weather(
+                    &sample(),
+                    "Lisbon",
+                    Units::Metric,
+                    view,
+                    now(),
+                    false,
+                    Some(&w)
+                ),
+                lisbon(&sample(), view, now()),
+                "{view:?}"
+            );
+        }
     }
 
     #[test]
@@ -842,6 +930,7 @@ pub(crate) mod tests {
             WeatherView::Details,
             now(),
             true,
+            None,
         );
         assert_eq!(c.value, "28°/18°");
         assert_eq!(c.label, "Clear", "not the old observation's feels-like");
@@ -884,6 +973,7 @@ pub(crate) mod tests {
             WeatherView::MoreDetails,
             now(),
             false,
+            None,
         );
         assert_eq!(c.detail, "30.01 inHg · Sunset 4h48");
         assert_eq!(c.label, "NW 12 · gusts 35", "already in mph");
@@ -982,6 +1072,7 @@ pub(crate) mod tests {
             WeatherView::MoreDetails,
             now(),
             true,
+            None,
         );
         assert_eq!(c.value, "UV --");
         assert_eq!(c.label, "Wind --");
@@ -1003,6 +1094,7 @@ pub(crate) mod tests {
             WeatherView::Day(1),
             now(),
             true,
+            None,
         );
         assert!(stale.stale);
     }
@@ -1052,6 +1144,7 @@ pub(crate) mod tests {
             WeatherView::Now,
             now(),
             true,
+            None,
         );
         assert_eq!(
             c.value, "14°",

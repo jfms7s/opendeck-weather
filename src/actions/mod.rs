@@ -125,7 +125,8 @@ impl<B: Behavior> CardAction<B> {
         let Some(location) = self.services.location_for(settings) else {
             return views::no_location();
         };
-        match B::card(&self.services, &location, settings, view, Utc::now()).await {
+        let utc_now = Utc::now();
+        let card = match B::card(&self.services, &location, settings, view, utc_now).await {
             Ok(card) => card,
             Err(e) => {
                 // The cache logged the failed attempt once; a render that
@@ -133,7 +134,10 @@ impl<B: Behavior> CardAction<B> {
                 log::debug!("{} has no data: {e}", B::UUID);
                 views::no_data(&location.name)
             }
-        }
+        };
+        // Every card for a place in Portugal carries IPMA's warning badge.
+        let warning = self.services.warning(&location, utc_now);
+        card.with_warning(warning.map(|w| w.level))
     }
 
     /// Builds the card for `id`'s current state and sends it, unless the
@@ -746,6 +750,18 @@ mod tests {
 
         // The search box can't send more than the plugin accepts.
         assert!(html.contains(&format!("maxlength=\"{MAX_QUERY_CHARS}\"")));
+    }
+
+    /// Both data sources are credited where users see them.
+    #[test]
+    fn the_readme_and_the_inspector_credit_both_data_sources() {
+        let html = include_str!("../../assets/propertyInspector/index.html");
+        let readme = include_str!("../../README.md");
+        assert!(html.contains("Weather data by Open-Meteo.com (CC BY 4.0)"));
+        assert!(html.contains("Weather warnings (Portugal) by IPMA (ipma.pt)"));
+        assert!(readme.contains("Weather data by [Open-Meteo.com](https://open-meteo.com/)"));
+        assert!(readme.contains("[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)"));
+        assert!(readme.contains("Weather warnings by [IPMA](https://www.ipma.pt/)"));
     }
 
     /// Serde wire names of the settings enums, for the contract test above.

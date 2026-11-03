@@ -1,4 +1,4 @@
-# Open-Meteo response fixtures
+# API response fixtures
 
 Real responses, captured on 2026-09-25 (local time 01:00 in Lisbon, as each file's
 `current.time` shows) and committed with the first version of the plugin. The parser
@@ -29,6 +29,22 @@ point, not the request - so these are the requests the plugin makes for Lisbon.)
 
   ```
   https://geocoding-api.open-meteo.com/v1/search?name=Lisbon&count=8&language=en&format=json
+  ```
+
+- `ipma-warnings.json` - IPMA's warnings feed, captured 2026-11-03 09:24 UTC
+  (every entry green that day; the parser tests recolour it and add inline entries
+  for active warnings):
+
+  ```
+  https://api.ipma.pt/open-data/forecast/warnings/warnings_www.json
+  ```
+
+- `ipma-areas.json` - IPMA's places and warning areas, captured 2026-11-03.
+  `ipma::AREAS` is this list compiled in (a test keeps them equal); the plugin
+  never fetches it:
+
+  ```
+  https://api.ipma.pt/open-data/distrits-islands.json
   ```
 
 - `settings-v0.1.json` - not an API response: settings in the shapes v0.1 saved in

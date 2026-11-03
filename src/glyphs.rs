@@ -159,6 +159,15 @@ pub fn stale_badge() -> String {
     )
 }
 
+/// A small warning triangle in the top-left corner, in an IPMA warning
+/// level's colour, drawn over a glyph (opposite the stale clock, so both
+/// can show).
+pub fn warning_badge(colour: &str) -> String {
+    format!(
+        r#"<path d="M4 0.4 7.8 7.2H0.2Z" fill="{colour}" stroke="{BACKGROUND}" stroke-width="0.9" stroke-linejoin="round"/><path d="M4 2.6v2.2" stroke="{BACKGROUND}" stroke-width="1.1" stroke-linecap="round"/><circle cx="4" cy="6" r="0.55" fill="{BACKGROUND}"/>"#
+    )
+}
+
 /// Wraps glyph elements as a standalone SVG document, for a touch-strip
 /// pixmap.
 pub fn document(body: &str) -> String {

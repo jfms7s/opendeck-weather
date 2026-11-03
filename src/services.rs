@@ -1,11 +1,14 @@
 //! Cached Open-Meteo access shared by all three actions, so every key and
 //! dial for the same place and units shares one request per refresh window.
-//! Also holds the plugin-wide default location (global settings).
+//! Also holds the plugin-wide default location (global settings), and
+//! IPMA's warnings for Portugal (one cached feed for the whole country).
 
 use crate::cache::{Cache, CachePolicy, Cached};
+use crate::ipma::{self, Warning};
 use crate::model::{AirQuality, Forecast, Location, Place, Settings, Units};
 use crate::open_meteo::{FetchError, OpenMeteo};
-use std::sync::RwLock;
+use chrono::{DateTime, Utc};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 pub const POLICY: CachePolicy = CachePolicy {
@@ -34,6 +37,8 @@ pub struct Services {
     api: OpenMeteo,
     forecasts: Cache<(PlaceKey, Units), Forecast, FetchError>,
     air: Cache<PlaceKey, AirQuality, FetchError>,
+    /// Shared with the background task that refreshes it.
+    warnings: Arc<Cache<(), Vec<Warning>, FetchError>>,
     default_location: RwLock<Option<Location>>,
 }
 
@@ -43,6 +48,7 @@ impl Default for Services {
             api: OpenMeteo::default(),
             forecasts: Cache::new(POLICY),
             air: Cache::new(POLICY),
+            warnings: Arc::new(Cache::new(POLICY)),
             default_location: RwLock::new(None),
         }
     }
@@ -91,6 +97,40 @@ impl Services {
             .await
     }
 
+    /// The IPMA warning active at `location` now, from what is cached:
+    /// `None` outside Portugal (no request is made), before the first fetch
+    /// lands, or while IPMA is unreachable with nothing younger than
+    /// `stale_after`. Never waits on the network: when a fetch is due it
+    /// runs in the background, and the next render shows the result.
+    pub fn warning(&self, location: &Location, utc_now: DateTime<Utc>) -> Option<ipma::Active> {
+        let api = self.api.clone();
+        self.warning_from(
+            location,
+            utc_now,
+            move || async move { ipma::fetch(&api).await },
+        )
+    }
+
+    fn warning_from<F, Fut>(
+        &self,
+        location: &Location,
+        utc_now: DateTime<Utc>,
+        fetch: F,
+    ) -> Option<ipma::Active>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<Vec<Warning>, FetchError>> + Send,
+    {
+        let area = ipma::area_for(location)?;
+        let (cached, due) = self.warnings.peek(&());
+        if due {
+            let warnings = self.warnings.clone();
+            // A failure is logged once per attempt by the cache.
+            tokio::spawn(async move { drop(warnings.get(&(), fetch).await) });
+        }
+        ipma::active(&cached?.value, area, utc_now)
+    }
+
     /// Uncached: only the property inspector's search box calls this.
     pub async fn search(&self, query: &str) -> Result<Vec<Place>, FetchError> {
         self.api.search(query).await
@@ -134,6 +174,116 @@ mod tests {
             longitude,
             label: None,
         }
+    }
+
+    use crate::ipma::{Kind, Level};
+    use chrono::TimeZone;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn rain_warning(area: &str) -> Warning {
+        Warning {
+            area: area.into(),
+            kind: Kind::Rain,
+            level: Level::Orange,
+            start: Utc.with_ymd_and_hms(2026, 11, 3, 6, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 11, 3, 18, 0, 0).unwrap(),
+        }
+    }
+
+    fn noon() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 11, 3, 12, 0, 0).unwrap()
+    }
+
+    /// `warning_from` with a fetcher that counts its calls, then lets the
+    /// background fetch finish.
+    async fn warning_counted(
+        services: &Services,
+        location: &Location,
+        calls: &Arc<AtomicU32>,
+        result: Result<Vec<Warning>, FetchError>,
+    ) -> Option<ipma::Active> {
+        let counter = calls.clone();
+        let w = services.warning_from(location, noon(), move || async move {
+            counter.fetch_add(1, Ordering::SeqCst);
+            result
+        });
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        w
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_location_outside_portugal_makes_no_ipma_request() {
+        let services = Services::default();
+        let calls = Arc::new(AtomicU32::new(0));
+        let madrid = at("Madrid", 40.4168, -3.7038);
+        for _ in 0..3 {
+            let w =
+                warning_counted(&services, &madrid, &calls, Ok(vec![rain_warning("LSB")])).await;
+            assert_eq!(w, None);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn warnings_are_fetched_in_the_background_and_shown_next_time() {
+        let services = Services::default();
+        let calls = Arc::new(AtomicU32::new(0));
+        let lisbon = at("Lisbon", 38.72509, -9.1498);
+        let feed = || Ok(vec![rain_warning("LSB"), rain_warning("PTO")]);
+        // The first render doesn't wait: no badge yet, a fetch starts.
+        assert_eq!(
+            warning_counted(&services, &lisbon, &calls, feed()).await,
+            None
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // The next one shows it, from the cache.
+        let w = warning_counted(&services, &lisbon, &calls, feed())
+            .await
+            .unwrap();
+        assert_eq!((w.kind, w.level), (Kind::Rain, Level::Orange));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // Another area of the same feed: no new request, no warning.
+        let faro = at("Faro", 37.0194, -7.9304);
+        assert_eq!(
+            warning_counted(&services, &faro, &calls, feed()).await,
+            None
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ipma_unreachable_means_no_warning() {
+        let services = Services::default();
+        let calls = Arc::new(AtomicU32::new(0));
+        let lisbon = at("Lisbon", 38.72509, -9.1498);
+        for _ in 0..3 {
+            let down = Err(FetchError::Http("could not connect".into()));
+            assert_eq!(
+                warning_counted(&services, &lisbon, &calls, down).await,
+                None
+            );
+        }
+        // Backing off: one attempt, not one per render.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_ipma_never_delays_the_answer() {
+        let services = Services::default();
+        let lisbon = at("Lisbon", 38.72509, -9.1498);
+        let w = services.warning_from(&lisbon, noon(), std::future::pending);
+        assert_eq!(w, None);
+        // Nor does a later render start another fetch while that one hangs.
+        let calls = Arc::new(AtomicU32::new(0));
+        for _ in 0..3 {
+            assert_eq!(
+                warning_counted(&services, &lisbon, &calls, Ok(vec![])).await,
+                None
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

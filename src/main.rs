@@ -2,6 +2,7 @@ mod actions;
 mod cache;
 mod card;
 mod glyphs;
+mod ipma;
 mod logging;
 mod model;
 mod open_meteo;

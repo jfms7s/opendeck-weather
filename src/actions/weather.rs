@@ -71,6 +71,7 @@ impl Behavior for Weather {
             view,
             now,
             f.stale,
+            services.warning(location, utc_now).as_ref(),
         ))
     }
 }

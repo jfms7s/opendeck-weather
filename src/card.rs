@@ -14,6 +14,7 @@
 //! inconsistent between tiles (same rationale as opendeck-claude-usage).
 
 use crate::glyphs::{self, Glyph};
+use crate::ipma::Level;
 use crate::palette;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -42,6 +43,9 @@ pub struct Card {
     /// The data is older than the cache TTL (refreshing it failed): drawn
     /// muted, with a small clock badge, on both surfaces.
     pub stale: bool,
+    /// The highest IPMA warning active at the location (Portugal only): a
+    /// small triangle in its colour, top-left, on both surfaces.
+    pub warning: Option<Level>,
 }
 
 impl Card {
@@ -59,6 +63,7 @@ impl Card {
             detail: detail.into(),
             key_label: None,
             stale: false,
+            warning: None,
         }
     }
 
@@ -75,6 +80,10 @@ impl Card {
 
     pub fn marked_stale(self, stale: bool) -> Self {
         Card { stale, ..self }
+    }
+
+    pub fn with_warning(self, warning: Option<Level>) -> Self {
+        Card { warning, ..self }
     }
 
     /// The one text line a key has room for under the value.
@@ -95,7 +104,18 @@ impl Card {
         if self.stale {
             body.push_str(&glyphs::stale_badge());
         }
+        if let Some(level) = self.warning {
+            body.push_str(&glyphs::warning_badge(warning_colour(level)));
+        }
         body
+    }
+}
+
+fn warning_colour(level: Level) -> &'static str {
+    match level {
+        Level::Yellow => palette::WARNING_YELLOW,
+        Level::Orange => palette::WARNING_ORANGE,
+        Level::Red => palette::WARNING_RED,
     }
 }
 
@@ -219,6 +239,45 @@ mod tests {
         let icon = feedback(&stale)["icon"].as_str().unwrap().to_string();
         assert!(icon.contains(&badge));
         assert_well_formed(&icon);
+    }
+
+    #[test]
+    fn a_warning_badges_both_surfaces_in_its_level_colour() {
+        let plain = card();
+        assert!(!key_svg(&plain).contains(palette::WARNING_ORANGE));
+        let icon = |c: &Card| feedback(c)["icon"].as_str().unwrap().to_string();
+        assert!(!icon(&plain).contains("M4 0.4"));
+
+        for (level, colour) in [
+            (Level::Yellow, palette::WARNING_YELLOW),
+            (Level::Orange, palette::WARNING_ORANGE),
+            (Level::Red, palette::WARNING_RED),
+        ] {
+            let warned = card().with_warning(Some(level));
+            let badge = glyphs::warning_badge(colour);
+            assert!(key_svg(&warned).contains(&badge), "{level:?}");
+            assert!(icon(&warned).contains(&badge), "{level:?}");
+            assert_well_formed(&key_svg(&warned));
+            assert_well_formed(&icon(&warned));
+            // The text is untouched.
+            assert_eq!(feedback(&warned)["value"], feedback(&plain)["value"]);
+        }
+    }
+
+    #[test]
+    fn a_warning_and_the_stale_clock_show_together() {
+        let both = card().marked_stale(true).with_warning(Some(Level::Red));
+        for svg in [
+            key_svg(&both),
+            feedback(&both)["icon"].as_str().unwrap().to_string(),
+        ] {
+            assert!(svg.contains(&glyphs::stale_badge()), "{svg}");
+            assert!(
+                svg.contains(&glyphs::warning_badge(palette::WARNING_RED)),
+                "{svg}"
+            );
+            assert_well_formed(&svg);
+        }
     }
 
     #[test]
