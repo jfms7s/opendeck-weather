@@ -1,0 +1,34 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+	"id": "com.jfms7s.weather.timeline-layout",
+	"items": [
+		{
+			"key": "icon",
+			"type": "pixmap",
+			"rect": [12, 2, 40, 40]
+		},
+		{
+			"key": "value",
+			"type": "text",
+			"rect": [0, 44, 64, 30],
+			"alignment": "center",
+			"color": "#f9fafb",
+			"value": "--",
+			"font": { "size": 24, "weight": 700 }
+		},
+		{
+			"key": "label",
+			"type": "text",
+			"rect": [0, 76, 64, 20],
+			"alignment": "center",
+			"color": "#d1d5db",
+			"value": "",
+			"font": { "size": 12, "weight": 600 }
+		},
+		{
+			"key": "chart",
+			"type": "pixmap",
+			"rect": [66, 6, 130, 88]
+		}
+	]
+}

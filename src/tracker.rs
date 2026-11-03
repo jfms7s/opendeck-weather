@@ -9,7 +9,7 @@
 //! (`claim_frame`), and the card last sent lets an unchanged frame be
 //! skipped instead of re-sent to OpenDeck.
 
-use crate::card::Card;
+use crate::card::{Card, Layout};
 use crate::model::Settings;
 use crate::wake::Wake;
 use dashmap::DashMap;
@@ -32,6 +32,9 @@ struct Tracked<V> {
     touched: Option<Instant>,
     revision: u64,
     shown: Option<Card>,
+    /// The touch-strip layout last set (`None`: unknown, after a failed
+    /// send). A new instance starts on the manifest's.
+    layout: Option<Layout>,
     /// The dial turned while pressed since it went down, so its release
     /// isn't a press.
     turned_while_pressed: bool,
@@ -52,7 +55,9 @@ pub enum Frame {
     /// built (a newer render is on its way), or it already shows this card.
     Skip,
     /// Send it. `first`: nothing has been sent since the instance appeared.
-    Send { first: bool },
+    /// `layout`: switch a dial to this layout first (it differs from the
+    /// last one set, or that is unknown).
+    Send { first: bool, layout: Option<Layout> },
 }
 
 pub struct Tracker<V> {
@@ -89,6 +94,7 @@ impl<V: Copy + Default + PartialEq> Tracker<V> {
                 touched: None,
                 revision: next_revision(),
                 shown: None,
+                layout: Some(Layout::Card),
                 turned_while_pressed: false,
             });
         if entry.settings != settings {
@@ -177,7 +183,10 @@ impl<V: Copy + Default + PartialEq> Tracker<V> {
         }
         let first = t.shown.is_none();
         t.shown = Some(card.clone());
-        Frame::Send { first }
+        let wanted = card.layout();
+        let layout = (t.layout != Some(wanted)).then_some(wanted);
+        t.layout = Some(wanted);
+        Frame::Send { first, layout }
     }
 
     /// The dial turned while held down.
@@ -198,6 +207,7 @@ impl<V: Copy + Default + PartialEq> Tracker<V> {
     pub fn forget_frame(&self, id: &str) {
         if let Some(mut t) = self.instances.get_mut(id) {
             t.shown = None;
+            t.layout = None;
         }
     }
 }
@@ -276,18 +286,88 @@ mod tests {
         t.track("a", Settings::default());
         let rev = t.snapshot("a").unwrap().revision;
         let card = views::no_location();
-        assert_eq!(t.claim_frame("a", rev, &card), Frame::Send { first: true });
+        assert_eq!(
+            t.claim_frame("a", rev, &card),
+            Frame::Send {
+                first: true,
+                layout: None
+            }
+        );
         assert_eq!(t.claim_frame("a", rev, &card), Frame::Skip);
         let other = views::no_data("Lisbon");
         assert_eq!(
             t.claim_frame("a", rev, &other),
-            Frame::Send { first: false }
+            Frame::Send {
+                first: false,
+                layout: None
+            }
         );
         // Appearing again (OpenDeck may have redrawn the key) resends.
         t.track("a", Settings::default());
-        assert_eq!(t.claim_frame("a", rev, &other), Frame::Send { first: true });
+        assert_eq!(
+            t.claim_frame("a", rev, &other),
+            Frame::Send {
+                first: true,
+                layout: None
+            }
+        );
         t.forget_frame("a");
-        assert_eq!(t.claim_frame("a", rev, &other), Frame::Send { first: true });
+        // The failed send may have been a layout switch: set it again.
+        assert_eq!(
+            t.claim_frame("a", rev, &other),
+            Frame::Send {
+                first: true,
+                layout: Some(Layout::Card)
+            }
+        );
+    }
+
+    #[test]
+    fn the_layout_is_switched_once_each_way_and_never_resent_unchanged() {
+        let t = tracker();
+        t.track("a", Settings::default());
+        let rev = t.snapshot("a").unwrap().revision;
+        let plain = views::no_data("Lisbon");
+        let chart = |v: &str| plain.clone().with_timeline(format!("<svg>{v}</svg>"));
+        let layout_of = |f: Frame| match f {
+            Frame::Send { layout, .. } => layout,
+            Frame::Skip => panic!("skipped"),
+        };
+        // Starts on the manifest's layout: nothing to switch.
+        assert_eq!(layout_of(t.claim_frame("a", rev, &plain)), None);
+        assert_eq!(
+            layout_of(t.claim_frame("a", rev, &chart("1"))),
+            Some(Layout::Timeline)
+        );
+        // A new chart on the same layout: no switch.
+        assert_eq!(layout_of(t.claim_frame("a", rev, &chart("2"))), None);
+        assert_eq!(
+            layout_of(t.claim_frame("a", rev, &plain)),
+            Some(Layout::Card)
+        );
+        assert_eq!(
+            layout_of(t.claim_frame("a", rev, &views::no_location())),
+            None
+        );
+        // New settings on a live instance keep what the dial shows.
+        t.track(
+            "a",
+            Settings {
+                units: Units::Imperial,
+                ..Settings::default()
+            },
+        );
+        let rev = t.snapshot("a").unwrap().revision;
+        assert_eq!(
+            layout_of(t.claim_frame("a", rev, &chart("3"))),
+            Some(Layout::Timeline)
+        );
+        t.track("a", Settings::default());
+        let rev = t.snapshot("a").unwrap().revision;
+        assert_eq!(
+            layout_of(t.claim_frame("a", rev, &plain)),
+            Some(Layout::Card)
+        );
     }
 
     #[test]
@@ -301,7 +381,10 @@ mod tests {
         let after = t.snapshot("a").unwrap().revision;
         assert_eq!(
             t.claim_frame("a", after, &card),
-            Frame::Send { first: true }
+            Frame::Send {
+                first: true,
+                layout: None
+            }
         );
         assert_eq!(t.claim_frame("gone", after, &card), Frame::Skip);
     }
