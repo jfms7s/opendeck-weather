@@ -77,6 +77,8 @@ macOS arm64 binary on a `macos-15` runner, then creates a **draft** release with
 `SHA256SUMS` and a provenance attestation; its notes start with the README smoke-test
 checklist, unticked, under an `UNVERIFIED` line (`scripts/release-body.mjs`, from the
 README's `smoke-checklist` markers - keep them). The draft's notes are the one place the
-ticked checklist goes; the owner runs it on Linux and a Mac and publishes with
-`scripts/publish-release.sh vX.Y.Z`, which refuses an `UNVERIFIED` draft. Agents stop at
-a verified draft.
+ticked checklist goes; the owner runs it on Linux and publishes with
+`scripts/publish-release.sh vX.Y.Z`, which refuses an `UNVERIFIED` draft. The "On a Mac"
+items run on a real Mac only until one published release has passed them, then only when
+the release touches TLS dependencies, the manifest, `build.mjs`/the bundle layout or
+filesystem paths (README "Releasing", step 4). Agents stop at a verified draft.
