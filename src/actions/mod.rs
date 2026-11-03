@@ -15,7 +15,7 @@ pub mod air_quality;
 pub mod forecast;
 pub mod weather;
 
-use crate::card::{self, Card};
+use crate::card::{self, Card, Layout};
 use crate::ipma;
 use crate::model::{GlobalSettings, Location, Place, Settings};
 use crate::open_meteo::{FetchError, MAX_QUERY_CHARS};
@@ -153,8 +153,9 @@ impl<B: Behavior> CardAction<B> {
         };
         let card = self.build_card(&snapshot.settings, snapshot.view).await;
         let _sending = self.tracker.sending().await;
-        if let Frame::Send { first } = self.tracker.claim_frame(id, snapshot.revision, &card)
-            && let Err(e) = show(surface, &card, first).await
+        if let Frame::Send { first, layout } =
+            self.tracker.claim_frame(id, snapshot.revision, &card)
+            && let Err(e) = show(surface, &card, first, layout).await
         {
             log::warn!("render failed: {e}");
             self.tracker.forget_frame(id);
@@ -372,6 +373,8 @@ pub trait Surface: Send + Sync {
     async fn set_title(&self, title: String) -> OpenActionResult<()>;
     async fn set_image(&self, image: String) -> OpenActionResult<()>;
     async fn set_feedback(&self, feedback: Value) -> OpenActionResult<()>;
+    /// Switches a dial's touch strip to another layout (`setFeedbackLayout`).
+    async fn set_layout(&self, layout: Layout) -> OpenActionResult<()>;
 }
 
 #[async_trait]
@@ -391,10 +394,20 @@ impl Surface for Instance {
     async fn set_feedback(&self, feedback: Value) -> OpenActionResult<()> {
         Instance::set_feedback(self, &feedback).await
     }
+
+    async fn set_layout(&self, layout: Layout) -> OpenActionResult<()> {
+        Instance::set_feedback_layout(self, layout.path().to_string()).await
+    }
 }
 
 /// Draws `card`. `first`: the first frame since the instance appeared.
-async fn show(surface: &impl Surface, card: &Card, first: bool) -> OpenActionResult<()> {
+/// `layout`: a dial must switch to it before the feedback (keys have none).
+async fn show(
+    surface: &impl Surface,
+    card: &Card,
+    first: bool,
+    layout: Option<Layout>,
+) -> OpenActionResult<()> {
     if surface.controller() == KEYPAD_CONTROLLER {
         if first {
             // The text is drawn inside the image; clear the native title
@@ -403,6 +416,9 @@ async fn show(surface: &impl Surface, card: &Card, first: bool) -> OpenActionRes
         }
         surface.set_image(card::key_image(card)).await
     } else {
+        if let Some(layout) = layout {
+            surface.set_layout(layout).await?;
+        }
         surface.set_feedback(card::feedback(card)).await
     }
 }
@@ -838,10 +854,23 @@ mod tests {
                 .push(("feedback", feedback.to_string()));
             Ok(())
         }
+        async fn set_layout(&self, layout: Layout) -> OpenActionResult<()> {
+            self.sent
+                .lock()
+                .unwrap()
+                .push(("layout", layout.path().to_string()));
+            Ok(())
+        }
     }
 
+    /// View 50 and up draws a chart, so it needs the timeline layout.
     fn echo_card(view: i32) -> Card {
-        Card::new(Glyph::Pin, view.to_string(), "label", "detail")
+        let card = Card::new(Glyph::Pin, view.to_string(), "label", "detail");
+        if view >= 50 {
+            card.with_timeline(format!("<svg>{view}</svg>"))
+        } else {
+            card
+        }
     }
 
     /// Shows its view as the value; view 100 waits for `GATE` first, so a
@@ -1035,6 +1064,44 @@ mod tests {
             dial.take(),
             [("feedback", card::feedback(&echo_card(0)).to_string())]
         );
+    }
+
+    #[tokio::test]
+    async fn a_dial_switches_layout_once_on_each_change_and_a_key_never() {
+        let action = echo();
+        let dial = FakeSurface::new("Encoder");
+        action.tracker.track("d", located());
+        let to = |view: i32| {
+            action.tracker.interact("d", |_| view);
+        };
+        action.render_on("d", &dial).await;
+        to(50);
+        action.render_on("d", &dial).await;
+        to(51);
+        action.render_on("d", &dial).await;
+        action.render_on("d", &dial).await;
+        to(1);
+        action.render_on("d", &dial).await;
+        let feedback = |v| ("feedback", card::feedback(&echo_card(v)).to_string());
+        let timeline = ("layout", Layout::Timeline.path().to_string());
+        let plain = ("layout", Layout::Card.path().to_string());
+        assert_eq!(
+            dial.take(),
+            [
+                feedback(0),
+                timeline,
+                feedback(50),
+                feedback(51),
+                plain,
+                feedback(1)
+            ]
+        );
+
+        let key = FakeSurface::new("Keypad");
+        action.tracker.track("k", located());
+        action.tracker.interact("k", |_| 50);
+        action.render_on("k", &key).await;
+        assert!(key.take().iter().all(|(kind, _)| *kind != "layout"));
     }
 
     #[tokio::test(start_paused = true)]

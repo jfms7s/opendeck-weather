@@ -17,6 +17,9 @@ pub enum WeatherView {
     Details,
     /// Wind direction and gusts, UV index, pressure and the next sun event.
     MoreDetails,
+    /// The next 12 hours as a bar chart (dials only: the page after
+    /// `MoreDetails` in the dial's press cycle).
+    Timeline,
 }
 
 impl WeatherView {
@@ -61,6 +64,16 @@ impl WeatherView {
             WeatherView::Details => WeatherView::MoreDetails,
             WeatherView::MoreDetails => WeatherView::Now,
             _ => WeatherView::Details,
+        }
+    }
+
+    /// A dial press: the key's cycle with the timeline after the second
+    /// details page.
+    pub fn next_dial_page(self) -> Self {
+        match self {
+            WeatherView::MoreDetails => WeatherView::Timeline,
+            WeatherView::Timeline => WeatherView::Now,
+            other => other.next_details(),
         }
     }
 }

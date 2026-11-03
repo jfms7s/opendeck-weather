@@ -1,6 +1,7 @@
 mod actions;
 mod cache;
 mod card;
+mod chart;
 mod glyphs;
 mod ipma;
 mod logging;

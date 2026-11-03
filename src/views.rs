@@ -8,6 +8,7 @@
 //! observation.
 
 use crate::card::Card;
+use crate::chart;
 use crate::glyphs::Glyph;
 use crate::ipma;
 use crate::model::{AirQuality, AqiScale, Current, Forecast, Hour, Units};
@@ -223,6 +224,26 @@ pub fn weather(
             };
             if covered && let Some(card) = forecast(f, 0, days, now, stale) {
                 return card;
+            }
+        }
+        WeatherView::Timeline => {
+            // The current conditions on the left, the next 12 hours from
+            // the current one on the right; nothing for "now" falls back
+            // to the resting screen (and its layout).
+            if let Some((i, h)) = hour_now {
+                let (code, is_day, temperature) = match observed {
+                    Some(c) => (c.code, c.is_day, c.temperature),
+                    None => (h.code, h.is_day, h.temperature),
+                };
+                let end = (i + chart::HOURS).min(f.hourly.len());
+                return Card::new(
+                    weather_glyph(code, is_day),
+                    temp(temperature),
+                    "Next 12h",
+                    "",
+                )
+                .with_timeline(chart::timeline(&f.hourly[i..end], units))
+                .marked_stale(stale);
             }
         }
         WeatherView::Now => {}
@@ -874,6 +895,37 @@ pub(crate) mod tests {
             Some(&w),
         );
         assert_eq!(c.label, "Rough sea until Sat 06:00");
+    }
+
+    #[test]
+    fn the_timeline_charts_twelve_hours_from_the_current_one() {
+        let f = sample();
+        let c = lisbon(&f, WeatherView::Timeline, now());
+        let (i, _) = current_hour(&f, now()).unwrap();
+        assert_eq!(
+            c.timeline.as_deref(),
+            Some(chart::timeline(&f.hourly[i..i + 12], Units::Metric).as_str())
+        );
+        assert_eq!(c.label, "Next 12h");
+        assert_eq!(c.layout(), crate::card::Layout::Timeline);
+        // The left column is the resting screen's icon and temperature.
+        let rest = lisbon(&f, WeatherView::Now, now());
+        assert_eq!((c.glyph, &c.value), (rest.glyph, &rest.value));
+        assert!(rest.timeline.is_none());
+    }
+
+    #[test]
+    fn the_timeline_near_the_end_of_the_data_charts_what_is_left() {
+        let f = sample();
+        let last = f.hourly.last().unwrap().time;
+        let c = lisbon(&f, WeatherView::Timeline, last);
+        assert_eq!(
+            c.timeline.as_deref(),
+            Some(chart::timeline(&f.hourly[f.hourly.len() - 1..], Units::Metric).as_str())
+        );
+        // Past the data entirely: the resting screen's fallback, no chart.
+        let c = lisbon(&f, WeatherView::Timeline, last + Duration::hours(2));
+        assert!(c.timeline.is_none());
     }
 
     #[test]
