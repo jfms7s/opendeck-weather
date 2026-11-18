@@ -1,4 +1,11 @@
-# Crates may only come from crates.io (cargo-deny's default allow-registry).
-[sources]
-unknown-registry = "deny"
-unknown-git = "deny"
+# cargo-deny configuration. CI runs `cargo deny check advisories` only.
+# Any exception goes in `[advisories] ignore`, each with an id and a reason.
+[advisories]
+ignore = [
+    # RustSec marked chrono unmaintained on 2026-09-14 (an informational notice, not a
+    # vulnerability; all versions are flagged, so no upgrade clears it). chrono is the plugin's
+    # date/time type across the model, the Open-Meteo parsing and the views (10 source files);
+    # swapping it for jiff or time is a rewrite with no security gain, so accept the notice.
+    # Review by 2027-02-18: drop this entry if chrono is maintained again, or migrate then.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained notice, no patched version; migrating to jiff/time is deferred" },
+]
