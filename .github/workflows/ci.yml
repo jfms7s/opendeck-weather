@@ -2,7 +2,7 @@ name: CI
 # Replaces the in-repo jobs test, aarch64, macos, advisories, quality.
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
 
 permissions: {}
